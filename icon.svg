@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="azul" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1240B4"/>
+      <stop offset="0.55" stop-color="#0B2B8F"/>
+      <stop offset="1" stop-color="#051A5E"/>
+    </linearGradient>
+    <path id="star" d="M0,-1 L0.225,-0.309 L0.951,-0.309 L0.363,0.118 L0.588,0.809 L0,0.382 L-0.588,0.809 L-0.363,0.118 L-0.951,-0.309 L-0.225,-0.309 Z" fill="#FFFFFF"/>
+  </defs>
+
+  <!-- Escudo -->
+  <path d="M256 30 L444 84 V270 C444 384 356 452 256 484 C156 452 68 384 68 270 V84 Z"
+        fill="url(#azul)" stroke="#FFFFFF" stroke-width="14"/>
+  <path d="M256 62 L414 108 V268 C414 366 340 424 256 452 C172 424 98 366 98 268 V108 Z"
+        fill="none" stroke="#FFFFFF" stroke-width="4" opacity="0.55"/>
+
+  <!-- Constelação Cruzeiro do Sul -->
+  <use href="#star" transform="translate(256 138) scale(26)"/>
+  <use href="#star" transform="translate(256 296) scale(32)"/>
+  <use href="#star" transform="translate(184 218) scale(24)"/>
+  <use href="#star" transform="translate(332 204) scale(24)"/>
+  <use href="#star" transform="translate(302 252) scale(15)"/>
+
+  <!-- Monograma -->
+  <text x="256" y="404" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-size="86" font-weight="900" fill="#FFFFFF" letter-spacing="2">TM</text>
+  <text x="256" y="444" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-size="34" font-weight="800" fill="#6FBE44">6.1</text>
+</svg>

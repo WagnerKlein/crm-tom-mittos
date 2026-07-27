@@ -50,6 +50,8 @@ body {
   display: flex; align-items: center; justify-content: center;
 }
 .logo-mark.small { width: 40px; height: 40px; font-size: .95rem; border-radius: 11px; margin: 0; flex: none; }
+.logo-img { width: 92px; height: 92px; display: block; margin: 0 auto; filter: drop-shadow(0 4px 12px rgba(0,0,0,.35)); }
+.logo-img.small { width: 42px; height: 42px; margin: 0; flex: none; }
 .v61 { color: var(--lime); cursor: help; }
 .login-label { color: #fff; margin: 22px 0 12px; font-weight: 600; }
 .login-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
