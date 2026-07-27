@@ -90,10 +90,43 @@ const Store = {
   cliente(id) { return this.db.clientes.find(c => c.id === id); },
   opp(id)     { return this.db.oportunidades.find(o => o.id === id); },
 
-  oppsVisiveis(user) {
-    // gerente e diretores veem tudo; vendedores veem tudo (transparência), filtros fazem o recorte
-    return this.db.oportunidades;
+  // ---------- carteiras e visibilidade por perfil ----------
+  podeVerTudo(u) { return u.papel === 'gerente' || u.papel === 'diretor'; },
+
+  clienteVisivel(c, u) {
+    if (this.podeVerTudo(u)) return true;
+    if (u.papel === 'externo') return !c.extId || c.extId === u.id;
+    if (u.papel === 'interno') return !c.intId || c.intId === u.id;
+    return true;
   },
+
+  naMinhaCarteira(c, u) {
+    if (!c) return false;
+    if (u.papel === 'externo') return c.extId === u.id;
+    if (u.papel === 'interno') return c.intId === u.id;
+    return false;
+  },
+
+  oppVisivel(o, u) {
+    if (this.podeVerTudo(u)) return true;
+    if (o.responsavelId === u.id) return true;
+    return this.naMinhaCarteira(this.cliente(o.clienteId), u);
+  },
+
+  intVisivel(i, u) {
+    if (this.podeVerTudo(u)) return true;
+    if (i.responsavelId === u.id) return true;
+    return this.naMinhaCarteira(this.cliente(i.clienteId), u);
+  },
+
+  cotVisivel(c, u) {
+    if (this.podeVerTudo(u)) return true;
+    if (c.responsavelId === u.id) return true;
+    return this.naMinhaCarteira(this.cliente(c.clienteId), u);
+  },
+
+  clientesVisiveis(u) { return this.db.clientes.filter(c => this.clienteVisivel(c, u)); },
+  oppsVisiveis(u)     { return this.db.oportunidades.filter(o => this.oppVisivel(o, u)); },
 
   // ---------- export / import ----------
   exportJSON() {

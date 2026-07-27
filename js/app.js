@@ -106,7 +106,7 @@ const App = {
 
   // ================= CÁLCULOS =================
   oppsAtivas() {
-    return Store.db.oportunidades.filter(o => !o.resultado);
+    return Store.oppsVisiveis(this.user).filter(o => !o.resultado);
   },
 
   agendaDe(o) {
@@ -175,7 +175,7 @@ const App = {
     const todas = this.aplicaFiltros(Store.db.oportunidades);
     const venc = ativas.filter(o => this.agendaDe(o) === 'vencido');
     const parados = ativas.filter(o => this.diasSemAtualizacao(o) > Store.db.config.diasParado);
-    const cotAbertas = Store.db.cotacoes.filter(c => c.status === 'Aberto' || c.status === 'Pendente');
+    const cotAbertas = Store.db.cotacoes.filter(c => (c.status === 'Aberto' || c.status === 'Pendente') && Store.cotVisivel(c, this.user));
     const pipeTotal = ativas.reduce((s, o) => s + (o.valor || 0), 0);
 
     const porEtapa = Store.db.config.etapas.map(e => {
@@ -227,20 +227,22 @@ const App = {
   // ================= CLIENTES =================
   vClientes() {
     const f = this.filtros;
-    let cls = Store.db.clientes.filter(c =>
+    let cls = Store.clientesVisiveis(this.user).filter(c =>
       (!f.seg || c.segmento === f.seg) && (!f.reg || c.regiao === f.reg));
     return `
     <div class="page-head"><h2>🏭 Clientes & Mapeamento de Contatos</h2><span class="spacer"></span>
       <button class="btn btn-accent" onclick="App.modalCliente()">＋ Novo Cliente</button></div>
     ${this.filtrosHTML()}
     ${cls.length ? `<div class="panel"><div class="table-wrap"><table>
-      <tr><th>Empresa</th><th>Cidade</th><th>Região</th><th>Segmento</th><th>Contatos</th><th>Oportunidades</th><th></th></tr>
+      <tr><th>Empresa</th><th>Cidade</th><th>Região</th><th>Segmento</th><th>Vend. Externo</th><th>Vend. Interno</th><th>Contatos</th><th>Oportunidades</th><th></th></tr>
       ${cls.map(c => {
         const opps = Store.db.oportunidades.filter(o => o.clienteId === c.id);
         return `<tr>
           <td><span class="link" onclick="App.abrirCliente(${c.id})">${esc(c.empresa)}</span></td>
           <td>${esc(c.cidade || '—')}</td><td>${esc(c.regiao || '—')}</td>
           <td>${esc(c.segmento || '—')}</td>
+          <td>${c.extId ? esc(Store.usuario(c.extId)?.nome || '') : '<span class="muted">livre</span>'}</td>
+          <td>${c.intId ? esc(Store.usuario(c.intId)?.nome || '') : '<span class="muted">livre</span>'}</td>
           <td>${(c.contatos || []).length}</td>
           <td>${opps.filter(o => !o.resultado).length} ativas / ${opps.length}</td>
           <td><button class="btn btn-sm btn-ghost" onclick="App.modalCliente(${c.id})">✎</button></td></tr>`;
@@ -251,11 +253,12 @@ const App = {
   abrirCliente(id) {
     const c = Store.cliente(id);
     if (!c) return;
-    const opps = Store.db.oportunidades.filter(o => o.clienteId === id);
-    const ints = Store.db.interacoes.filter(i => i.clienteId === id).sort((a, b) => b.data.localeCompare(a.data));
+    const opps = Store.db.oportunidades.filter(o => o.clienteId === id && Store.oppVisivel(o, this.user));
+    const ints = Store.db.interacoes.filter(i => i.clienteId === id && Store.intVisivel(i, this.user)).sort((a, b) => b.data.localeCompare(a.data));
     this.modal(`
       <h3>🏭 ${esc(c.empresa)}</h3>
       <p class="muted">${esc(c.cidade || '')} · ${esc(c.regiao || '')} · ${esc(c.segmento || '')}</p>
+      <p class="muted">Carteira — Externo: <b>${c.extId ? esc(Store.usuario(c.extId)?.nome || '') : 'livre'}</b> · Interno: <b>${c.intId ? esc(Store.usuario(c.intId)?.nome || '') : 'livre'}</b></p>
       ${c.obs ? `<p style="margin:8px 0">${esc(c.obs)}</p>` : ''}
       <div class="panel" style="margin-top:12px"><h3>👥 Contatos mapeados</h3>
         ${(c.contatos || []).length ? `<div class="table-wrap"><table><tr><th>Nome</th><th>Setor</th><th>Telefone</th><th>E-mail</th></tr>
@@ -286,6 +289,10 @@ const App = {
         <div class="fg"><label>Região</label><select id="f_regiao"><option value=""></option>${opts(cfg.regioes, c.regiao)}</select></div>
         <div class="fg"><label>Segmento</label><select id="f_segmento"><option value=""></option>${opts(cfg.segmentos, c.segmento)}</select></div>
         <div class="fg"><label>&nbsp;</label><span class="muted">Segmentação p/ filtros e relatórios</span></div>
+        <div class="fg"><label>Carteira — Vend. Externo</label><select id="f_ext" ${this.user.papel === 'externo' || this.user.papel === 'interno' ? 'disabled' : ''}><option value="">— livre —</option>
+          ${Store.db.usuarios.filter(u => u.papel === 'externo').map(u => `<option value="${u.id}" ${u.id === c.extId ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
+        <div class="fg"><label>Carteira — Vend. Interno</label><select id="f_int" ${this.user.papel === 'externo' || this.user.papel === 'interno' ? 'disabled' : ''}><option value="">— livre —</option>
+          ${Store.db.usuarios.filter(u => u.papel === 'interno').map(u => `<option value="${u.id}" ${u.id === c.intId ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg full"><label>Observações</label><textarea id="f_obs" rows="2">${esc(c.obs || '')}</textarea></div>
       </div>
       <h3 style="margin-top:16px">👥 Contatos</h3>
@@ -330,6 +337,11 @@ const App = {
       segmento: document.getElementById('f_segmento').value,
       obs: document.getElementById('f_obs').value.trim(), contatos
     };
+    // carteiras: só gerência/diretoria altera (campos desabilitados p/ vendedores)
+    const selExt = document.getElementById('f_ext'), selInt = document.getElementById('f_int');
+    if (!selExt.disabled) { dados.extId = selExt.value || null; dados.intId = selInt.value || null; }
+    else if (!id && this.user.papel === 'externo') { dados.extId = this.user.id; dados.intId = null; }
+    else if (!id && this.user.papel === 'interno') { dados.intId = this.user.id; dados.extId = null; }
     if (id) {
       Object.assign(Store.cliente(id), dados);
     } else {
@@ -353,7 +365,7 @@ const App = {
   vPipeline() {
     const cfg = Store.db.config;
     const ativas = this.aplicaFiltros(this.oppsAtivas());
-    const fechadas = this.aplicaFiltros(Store.db.oportunidades.filter(o => o.resultado));
+    const fechadas = this.aplicaFiltros(Store.oppsVisiveis(this.user).filter(o => o.resultado));
     return `
     <div class="page-head"><h2>📈 Funil de Oportunidades</h2><span class="spacer"></span>
       <button class="btn btn-accent" onclick="App.novaOportunidade()">＋ Nova Oportunidade</button></div>
@@ -421,7 +433,7 @@ const App = {
       <h3>${id ? '✎ Editar' : '＋ Nova'} Oportunidade</h3>
       <div class="form-grid">
         <div class="fg full"><label>Título / Descrição *</label><input id="o_titulo" value="${esc(o.titulo || '')}" placeholder="Ex.: Reforma de cilindros — frota CAT"></div>
-        <div class="fg"><label>Cliente *</label><select id="o_cliente">${Store.db.clientes.map(c => `<option value="${c.id}" ${c.id === o.clienteId ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
+        <div class="fg"><label>Cliente *</label><select id="o_cliente">${Store.clientesVisiveis(this.user).map(c => `<option value="${c.id}" ${c.id === o.clienteId ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
         <div class="fg"><label>Fabricante / Linha</label><select id="o_fab"><option value=""></option>${opts(cfg.fabricantes, o.fabricante)}</select></div>
         <div class="fg"><label>Responsável</label><select id="o_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === (o.responsavelId || this.user.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg"><label>Etapa</label><select id="o_etapa">${opts(cfg.etapas, o.etapa || cfg.etapas[0])}</select></div>
@@ -529,7 +541,7 @@ const App = {
   // ================= INTERAÇÕES =================
   vInteracoes() {
     const f = this.filtros;
-    let ints = [...Store.db.interacoes].sort((a, b) => b.data.localeCompare(a.data));
+    let ints = Store.db.interacoes.filter(i => Store.intVisivel(i, this.user)).sort((a, b) => b.data.localeCompare(a.data));
     if (f.resp) ints = ints.filter(i => i.responsavelId === f.resp);
     return `
     <div class="page-head"><h2>📚 Interações, Prospecções & Visitas</h2><span class="spacer"></span>
@@ -557,7 +569,7 @@ const App = {
       <div class="form-grid">
         <div class="fg"><label>Data</label><input id="i_data" type="date" value="${hoje()}"></div>
         <div class="fg"><label>Tipo *</label><select id="i_tipo">${cfg.tiposInteracao.map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
-        <div class="fg"><label>Cliente *</label><select id="i_cliente" onchange="App.syncOppsDoCliente()">${Store.db.clientes.map(c => `<option value="${c.id}" ${opp && c.id === opp.clienteId ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
+        <div class="fg"><label>Cliente *</label><select id="i_cliente" onchange="App.syncOppsDoCliente()">${Store.clientesVisiveis(this.user).map(c => `<option value="${c.id}" ${opp && c.id === opp.clienteId ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
         <div class="fg"><label>Oportunidade (opcional)</label><select id="i_opp"></select></div>
         <div class="fg full"><label>Descrição *</label><textarea id="i_desc" rows="3" placeholder="O que foi tratado?"></textarea></div>
         <div class="fg"><label>Responsável</label><select id="i_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === this.user.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
@@ -574,7 +586,7 @@ const App = {
   syncOppsDoCliente(selId) {
     const cid = +document.getElementById('i_cliente').value;
     const sel = document.getElementById('i_opp');
-    const opps = Store.db.oportunidades.filter(o => o.clienteId === cid && !o.resultado);
+    const opps = Store.db.oportunidades.filter(o => o.clienteId === cid && !o.resultado && Store.oppVisivel(o, this.user));
     sel.innerHTML = `<option value="">— nenhuma —</option>` +
       opps.map(o => `<option value="${o.id}" ${o.id === selId ? 'selected' : ''}>${esc(o.titulo)}</option>`).join('');
   },
@@ -607,7 +619,7 @@ const App = {
   // ================= COTAÇÕES =================
   vCotacoes() {
     const f = this.filtros;
-    let cots = [...Store.db.cotacoes].sort((a, b) => b.id - a.id);
+    let cots = Store.db.cotacoes.filter(c => Store.cotVisivel(c, this.user)).sort((a, b) => b.id - a.id);
     if (f.resp) cots = cots.filter(c => c.responsavelId === f.resp);
     if (f.fab) cots = cots.filter(c => c.fabricante === f.fab);
     const abertas = cots.filter(c => c.status === 'Aberto' || c.status === 'Pendente');
@@ -658,9 +670,9 @@ const App = {
     this.modal(`
       <h3>${id ? '✎ Editar' : '＋ Nova'} Cotação ${ct.numero ? `<span class="muted">${esc(ct.numero)}</span>` : ''}</h3>
       <div class="form-grid">
-        <div class="fg"><label>Cliente *</label><select id="c_cliente">${Store.db.clientes.map(c => `<option value="${c.id}" ${(opp ? c.id === opp.clienteId : c.id === ct.clienteId) ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
+        <div class="fg"><label>Cliente *</label><select id="c_cliente">${Store.clientesVisiveis(this.user).map(c => `<option value="${c.id}" ${(opp ? c.id === opp.clienteId : c.id === ct.clienteId) ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
         <div class="fg"><label>Oportunidade vinculada</label><select id="c_opp"><option value="">— nenhuma —</option>
-          ${Store.db.oportunidades.filter(o => !o.resultado).map(o => `<option value="${o.id}" ${o.id === (oppId || ct.oppId) ? 'selected' : ''}>${esc(o.titulo)}</option>`).join('')}</select></div>
+          ${Store.oppsVisiveis(this.user).filter(o => !o.resultado).map(o => `<option value="${o.id}" ${o.id === (oppId || ct.oppId) ? 'selected' : ''}>${esc(o.titulo)}</option>`).join('')}</select></div>
         <div class="fg"><label>Fabricante / Linha</label><select id="c_fab"><option value=""></option>${cfg.fabricantes.map(x => `<option ${x === (ct.fabricante || opp?.fabricante) ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
         <div class="fg"><label>Responsável</label><select id="c_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === (ct.responsavelId || this.user.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg"><label>Valor (R$) *</label><input id="c_valor" type="number" min="0" step="100" value="${ct.valor || opp?.valor || ''}"></div>
@@ -735,8 +747,10 @@ const App = {
 
   // ================= DASHBOARD COMERCIAL =================
   vComercial() {
-    const opps = this.aplicaFiltros(Store.db.oportunidades);
-    const vendedores = Store.db.usuarios.filter(u => u.papel !== 'diretor');
+    const opps = this.aplicaFiltros(Store.oppsVisiveis(this.user));
+    const vendedores = Store.podeVerTudo(this.user)
+      ? Store.db.usuarios.filter(u => u.papel !== 'diretor')
+      : [this.user];
     const linhas = vendedores.map(u => {
       const minhas = opps.filter(o => o.responsavelId === u.id);
       const ativas = minhas.filter(o => !o.resultado);
@@ -777,7 +791,7 @@ const App = {
 
   // ================= DASHBOARD EXECUTIVO =================
   vExecutivo() {
-    const opps = this.aplicaFiltros(Store.db.oportunidades);
+    const opps = this.aplicaFiltros(Store.oppsVisiveis(this.user));
     const ativas = opps.filter(o => !o.resultado);
     const pipeTotal = ativas.reduce((s, o) => s + (o.valor || 0), 0);
     const mesAtual = hoje().slice(0, 7);
@@ -968,11 +982,11 @@ const App = {
     if (q.length < 2) return;
     clearTimeout(this._st);
     this._st = setTimeout(() => {
-      const cls = Store.db.clientes.filter(c =>
+      const cls = Store.clientesVisiveis(this.user).filter(c =>
         c.empresa.toLowerCase().includes(q) ||
         (c.contatos || []).some(ct => ct.nome.toLowerCase().includes(q)));
-      const opps = Store.db.oportunidades.filter(o => o.titulo.toLowerCase().includes(q));
-      const cots = Store.db.cotacoes.filter(c => c.numero.toLowerCase().includes(q));
+      const opps = Store.oppsVisiveis(this.user).filter(o => o.titulo.toLowerCase().includes(q));
+      const cots = Store.db.cotacoes.filter(c => Store.cotVisivel(c, this.user) && c.numero.toLowerCase().includes(q));
       document.getElementById('view').innerHTML = `
         <div class="page-head"><h2>🔍 Resultados para "${esc(q)}"</h2></div>
         <div class="panel"><h3>🏭 Clientes (${cls.length})</h3>
