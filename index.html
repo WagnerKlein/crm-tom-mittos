@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#00563B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>CRM Tom Mittos 6.1</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2300563B'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='%236FBE44' font-family='Arial' font-weight='bold'>TM</text></svg>">
+</head>
+<body>
+
+<!-- ===== LOGIN ===== -->
+<div id="login" class="login-overlay">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-mark">TM</div>
+      <h1>CRM Tom Mittos <span class="v61" title="6x1 — Nós somos o Cruzeiro! 💙⚽">6.1</span></h1>
+      <p class="login-sub">Gestão Comercial do Grupo — Pneumática · Hidráulica · Eletrônica</p>
+      <p class="login-tag">"Fazer Certo a Coisa Certa" — JMP</p>
+    </div>
+    <p class="login-label">Quem está entrando?</p>
+    <div id="loginGrid" class="login-grid"></div>
+  </div>
+  <p class="login-footer">© 2026 Grupo JMP · Parker Premier Distributor · "Juntos, somos mais fortes"</p>
+</div>
+
+<!-- ===== APP SHELL ===== -->
+<div id="app" class="app hidden">
+  <aside id="sidebar" class="sidebar">
+    <div class="side-brand">
+      <div class="logo-mark small">TM</div>
+      <div>
+        <div class="brand-name">CRM Tom Mittos</div>
+        <div class="brand-v v61" title="6x1 — Nós somos o Cruzeiro! 💙⚽">v6.1</div>
+      </div>
+    </div>
+    <button class="btn btn-accent side-new" onclick="App.novaOportunidade()">＋ Nova Oportunidade</button>
+    <nav id="nav" class="nav"></nav>
+    <div class="side-user">
+      <div id="userAvatar" class="avatar"></div>
+      <div class="side-user-info">
+        <div id="userName"></div>
+        <div id="userRole" class="muted"></div>
+      </div>
+      <button class="btn-icon" title="Sair" onclick="App.logout()">⎋</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="btn-icon menu-btn" onclick="App.toggleMenu()">☰</button>
+      <input id="globalSearch" class="search" type="search" placeholder="Buscar clientes, oportunidades, cotações..." oninput="App.globalSearch(this.value)">
+      <div id="alertBadge" class="alert-badge hidden" onclick="App.go('agenda')">🔔 <span id="alertCount"></span></div>
+    </header>
+    <main id="view" class="view"></main>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
