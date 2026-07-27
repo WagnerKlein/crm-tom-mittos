@@ -572,7 +572,7 @@ const App = {
         <div class="fg"><label>Cliente *</label><select id="i_cliente" onchange="App.syncOppsDoCliente()">${Store.clientesVisiveis(this.user).map(c => `<option value="${c.id}" ${opp && c.id === opp.clienteId ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
         <div class="fg"><label>Oportunidade (opcional)</label><select id="i_opp"></select></div>
         <div class="fg full"><label>Descrição * <button type="button" class="btn-mic" title="Ditar por voz" onclick="App.ditar('i_desc', this)">🎤</button></label><textarea id="i_desc" rows="3" placeholder="O que foi tratado? (ou toque no microfone e fale)"></textarea></div>
-        <div class="fg full"><label>Relatório de visita / comentários <button type="button" class="btn-mic" title="Ditar por voz" onclick="App.ditar('i_rel', this)">🎤</button></label><textarea id="i_rel" rows="5" placeholder="Detalhe a visita: quem recebeu, necessidades levantadas, equipamentos vistos, próximos passos... (ou dite por voz)"></textarea></div>
+        <div class="fg full"><label>Relatório de visita / comentários <button type="button" class="btn-mic" title="Ditar por voz" onclick="App.ditar('i_rel', this)">🎤</button> <button type="button" class="btn-mic" title="Limpar ruídos e organizar em tópicos" onclick="App.organizarTexto('i_rel')">✨ Organizar</button></label><textarea id="i_rel" rows="5" placeholder="Detalhe a visita: quem recebeu, necessidades levantadas, equipamentos vistos, próximos passos... (ou dite por voz e toque em ✨ Organizar)"></textarea></div>
         <div class="fg"><label>Responsável</label><select id="i_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === this.user.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg"><label>Próxima ação</label><input id="i_prox" placeholder="Ex.: Enviar proposta"></div>
         <div class="fg full"><label><input type="checkbox" id="i_atualiza" checked style="width:auto;margin-right:6px">Atualizar "último contato" e reagendar follow-up (+${cfg.diasFollowUp} dias)</label></div>
@@ -1029,6 +1029,47 @@ const App = {
     btn.classList.add('rec');
     rec.start();
     this.toast('🎤 Pode falar! Toque no microfone de novo para encerrar.');
+  },
+
+  // Limpa vícios de fala do ditado e organiza em tópicos + próximas ações
+  organizarTexto(targetId) {
+    const ta = document.getElementById(targetId);
+    let t = (ta.value || '').trim();
+    if (!t) return this.toast('⚠️ Dite ou escreva o relatório primeiro');
+    if (t.startsWith('📋')) return this.toast('Já está organizado 😉');
+
+    // remove muletas de fala (conservador; \b não funciona com acento, usa \p{L})
+    const muletas = ['né\\??', 'é{2,}h*', 'ã+h*n?', 'hu+m+', 'uhm+', 'tipo assim',
+      'então tá', 'tá bom\\??', 'tá\\?', 'beleza\\??', 'enfim', 'ok então'];
+    muletas.forEach(w => {
+      t = t.replace(new RegExp(`(?<!\\p{L})(?:${w})(?!\\p{L})`, 'giu'), ' ');
+    });
+    t = t.replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1').trim();
+
+    // quebra em frases (pontuação ou conectivos comuns do ditado)
+    const frases = t.split(/(?<=[.!?])\s+|\s+(?=aí depois\b)|\s+(?=depois disso\b)/i)
+      .flatMap(f => f.split(/[.!?]+/)).map(f => f.trim()).filter(f => f.length > 2);
+
+    const acaoRx = /^(vou|vamos|preciso|precisamos|tenho que|temos que|agendar|enviar|mandar|retornar|ligar|levar|cotar|orçar|combinamos|combinei|ficou de|ele vai|ela vai|eles vão)\b|(\bficou de\b|\bpróxima semana\b|\bsemana que vem\b|\baté (o dia|dia|sexta|segunda|terça|quarta|quinta)\b)/i;
+    const acoes = [], pontos = [];
+    frases.forEach(f => {
+      const frase = f[0].toUpperCase() + f.slice(1);
+      (acaoRx.test(f) ? acoes : pontos).push(frase);
+    });
+
+    let out = `📋 RELATÓRIO — ${fmtData(document.getElementById('i_data')?.value || hoje())}\n`;
+    out += pontos.map(p => `• ${p}` + (/[.!?]$/.test(p) ? '' : '.')).join('\n');
+    if (acoes.length) {
+      out += `\n\n➡️ PRÓXIMAS AÇÕES:\n` + acoes.map(a => `• ${a}` + (/[.!?]$/.test(a) ? '' : '.')).join('\n');
+      const proxCampo = document.getElementById('i_prox');
+      if (proxCampo && !proxCampo.value) {
+        let a = acoes[0];
+        if (a.length > 80) a = a.slice(0, 80).slice(0, a.slice(0, 80).lastIndexOf(' ')) + '…';
+        proxCampo.value = a;
+      }
+    }
+    ta.value = out;
+    this.toast('✨ Relatório organizado! Revise antes de salvar.');
   },
 
   verInteracao(id) {
