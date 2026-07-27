@@ -269,7 +269,7 @@ const App = {
         ${opps.length ? opps.map(o => `<p style="margin-bottom:6px"><span class="link" onclick="App.fecharModal();App.abrirOpp(${o.id})">${esc(o.titulo)}</span> ${this.etapaChip(o)} <b>${fmtMoeda(o.valor)}</b></p>`).join('') : '<p class="muted">Nenhuma.</p>'}
       </div>
       <div class="panel"><h3>📚 Últimas interações</h3>
-        ${ints.length ? `<ul class="timeline">${ints.slice(0, 6).map(i => `<li><div class="quando">${fmtData(i.data)} · ${esc(i.tipo)} · ${esc(Store.usuario(i.responsavelId)?.nome || '')}</div>${esc(i.descricao)}</li>`).join('')}</ul>` : '<p class="muted">Nenhuma.</p>'}
+        ${ints.length ? `<ul class="timeline">${ints.slice(0, 6).map(i => `<li><div class="quando">${fmtData(i.data)} · ${esc(i.tipo)} · ${esc(Store.usuario(i.responsavelId)?.nome || '')}</div>${esc(i.descricao)}${i.relatorio ? ` <span class="link" onclick="App.fecharModal();App.verInteracao(${i.id})">📝 ver relatório</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nenhuma.</p>'}
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="App.fecharModal()">Fechar</button>
@@ -496,7 +496,7 @@ const App = {
       ${o.obs ? `<p style="margin:8px 0">${esc(o.obs)}</p>` : ''}
       ${o.motivoPerda ? `<p style="margin:8px 0;color:var(--vermelho)">Motivo da perda: ${esc(o.motivoPerda)}</p>` : ''}
       <div class="panel" style="margin-top:12px"><h3>📚 Interações (${ints.length})</h3>
-        ${ints.length ? `<ul class="timeline">${ints.slice(0, 8).map(i => `<li><div class="quando">${fmtData(i.data)} · ${esc(i.tipo)} · ${esc(Store.usuario(i.responsavelId)?.nome || '')}</div>${esc(i.descricao)}${i.proximaAcao ? ` <b>→ ${esc(i.proximaAcao)}</b>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nenhuma interação registrada.</p>'}
+        ${ints.length ? `<ul class="timeline">${ints.slice(0, 8).map(i => `<li><div class="quando">${fmtData(i.data)} · ${esc(i.tipo)} · ${esc(Store.usuario(i.responsavelId)?.nome || '')}</div>${esc(i.descricao)}${i.proximaAcao ? ` <b>→ ${esc(i.proximaAcao)}</b>` : ''}${i.relatorio ? ` <span class="link" onclick="App.fecharModal();App.verInteracao(${i.id})">📝 ver relatório</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nenhuma interação registrada.</p>'}
         <button class="btn btn-sm btn-accent" onclick="App.fecharModal();App.modalInteracao(null,${id})">＋ Registrar interação</button>
       </div>
       <div class="panel"><h3>📄 Cotações (${cots.length})</h3>
@@ -553,7 +553,7 @@ const App = {
         <td>${fmtData(i.data)}</td><td>${esc(i.tipo)}</td>
         <td>${esc(Store.cliente(i.clienteId)?.empresa || '—')}</td>
         <td>${i.oppId ? `<span class="link" onclick="App.abrirOpp(${i.oppId})">${esc(Store.opp(i.oppId)?.titulo || '—')}</span>` : '—'}</td>
-        <td>${esc(i.descricao)}</td>
+        <td><span class="link" onclick="App.verInteracao(${i.id})">${esc(i.descricao.slice(0, 60))}${i.descricao.length > 60 ? '…' : ''}</span>${i.relatorio ? ' 📝' : ''}</td>
         <td>${esc(Store.usuario(i.responsavelId)?.nome || '—')}</td>
         <td>${esc(i.proximaAcao || '—')}</td></tr>`).join('')}</table></div></div>`
       : `<div class="panel"><p class="muted">Nenhuma interação. Registre ligações, visitas presenciais/virtuais, e-mails e WhatsApps aqui.</p></div>`}`;
@@ -571,7 +571,8 @@ const App = {
         <div class="fg"><label>Tipo *</label><select id="i_tipo">${cfg.tiposInteracao.map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
         <div class="fg"><label>Cliente *</label><select id="i_cliente" onchange="App.syncOppsDoCliente()">${Store.clientesVisiveis(this.user).map(c => `<option value="${c.id}" ${opp && c.id === opp.clienteId ? 'selected' : ''}>${esc(c.empresa)}</option>`).join('')}</select></div>
         <div class="fg"><label>Oportunidade (opcional)</label><select id="i_opp"></select></div>
-        <div class="fg full"><label>Descrição *</label><textarea id="i_desc" rows="3" placeholder="O que foi tratado?"></textarea></div>
+        <div class="fg full"><label>Descrição * <button type="button" class="btn-mic" title="Ditar por voz" onclick="App.ditar('i_desc', this)">🎤</button></label><textarea id="i_desc" rows="3" placeholder="O que foi tratado? (ou toque no microfone e fale)"></textarea></div>
+        <div class="fg full"><label>Relatório de visita / comentários <button type="button" class="btn-mic" title="Ditar por voz" onclick="App.ditar('i_rel', this)">🎤</button></label><textarea id="i_rel" rows="5" placeholder="Detalhe a visita: quem recebeu, necessidades levantadas, equipamentos vistos, próximos passos... (ou dite por voz)"></textarea></div>
         <div class="fg"><label>Responsável</label><select id="i_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === this.user.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg"><label>Próxima ação</label><input id="i_prox" placeholder="Ex.: Enviar proposta"></div>
         <div class="fg full"><label><input type="checkbox" id="i_atualiza" checked style="width:auto;margin-right:6px">Atualizar "último contato" e reagendar follow-up (+${cfg.diasFollowUp} dias)</label></div>
@@ -601,6 +602,7 @@ const App = {
       tipo: document.getElementById('i_tipo').value,
       clienteId: +document.getElementById('i_cliente').value,
       oppId, descricao: desc,
+      relatorio: document.getElementById('i_rel').value.trim(),
       responsavelId: document.getElementById('i_resp').value,
       proximaAcao: document.getElementById('i_prox').value.trim()
     };
@@ -996,6 +998,49 @@ const App = {
         <div class="panel"><h3>📄 Cotações (${cots.length})</h3>
           ${cots.map(c => `<p style="margin-bottom:6px"><b>${esc(c.numero)}</b> · ${esc(Store.cliente(c.clienteId)?.empresa || '')} · ${fmtMoeda(c.valor)}</p>`).join('') || '<p class="muted">Nenhuma.</p>'}</div>`;
     }, 250);
+  },
+
+  // ================= DITADO POR VOZ =================
+  ditar(targetId, btn) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return this.toast('⚠️ Ditado não suportado neste navegador. No celular, use o 🎤 do próprio teclado.');
+    if (this._rec) { this._rec.stop(); return; }
+    const ta = document.getElementById(targetId);
+    const rec = new SR();
+    rec.lang = 'pt-BR';
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          const t = e.results[i][0].transcript.trim();
+          ta.value = (ta.value ? ta.value.trim() + ' ' : '') + t;
+        }
+      }
+    };
+    rec.onend = () => { this._rec = null; document.querySelectorAll('.btn-mic.rec').forEach(b => b.classList.remove('rec')); this.toast('🎤 Ditado encerrado'); };
+    rec.onerror = ev => {
+      this._rec = null;
+      document.querySelectorAll('.btn-mic.rec').forEach(b => b.classList.remove('rec'));
+      if (ev.error === 'not-allowed') this.toast('⚠️ Permita o acesso ao microfone no navegador');
+      else if (ev.error !== 'aborted') this.toast('⚠️ Não entendi — tente de novo');
+    };
+    this._rec = rec;
+    btn.classList.add('rec');
+    rec.start();
+    this.toast('🎤 Pode falar! Toque no microfone de novo para encerrar.');
+  },
+
+  verInteracao(id) {
+    const i = Store.db.interacoes.find(x => x.id === id);
+    if (!i) return;
+    this.modal(`
+      <h3>📚 ${esc(i.tipo)} — ${fmtData(i.data)}</h3>
+      <p class="muted">🏭 ${esc(Store.cliente(i.clienteId)?.empresa || '—')} · Resp.: <b>${esc(Store.usuario(i.responsavelId)?.nome || '—')}</b>${i.oppId ? ` · Oportunidade: ${esc(Store.opp(i.oppId)?.titulo || '')}` : ''}</p>
+      <div class="panel" style="margin-top:12px"><h3>Descrição</h3><p>${esc(i.descricao)}</p></div>
+      ${i.relatorio ? `<div class="panel"><h3>📝 Relatório de visita</h3><p style="white-space:pre-wrap">${esc(i.relatorio)}</p></div>` : ''}
+      ${i.proximaAcao ? `<p><b>→ Próxima ação:</b> ${esc(i.proximaAcao)}</p>` : ''}
+      <div class="modal-actions"><button class="btn btn-ghost" onclick="App.fecharModal()">Fechar</button></div>`);
   },
 
   // ================= MODAL BASE =================

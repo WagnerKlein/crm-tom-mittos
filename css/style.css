@@ -226,6 +226,15 @@ td .link:hover { text-decoration: underline; }
 .contato-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1.3fr auto; gap: 6px; margin-bottom: 6px; }
 .contato-row input, .contato-row select { padding: 7px 9px; border: 1px solid var(--borda); border-radius: 8px; font-size: .8rem; }
 
+/* ===== DITADO POR VOZ ===== */
+.btn-mic {
+  border: 1px solid var(--borda); background: var(--fundo); border-radius: 8px;
+  cursor: pointer; font-size: .9rem; padding: 2px 8px; margin-left: 6px; vertical-align: middle;
+}
+.btn-mic:hover { border-color: var(--lime); }
+.btn-mic.rec { background: var(--vermelho); border-color: var(--vermelho); animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+
 /* ===== TOAST ===== */
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
