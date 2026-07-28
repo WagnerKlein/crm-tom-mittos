@@ -8,14 +8,32 @@ const App = {
   filtros: { resp: '', fab: '', seg: '', reg: '', etapa: '' },
 
   init() {
-    Store.load();
-    const saved = sessionStorage.getItem('crm_tm_user');
-    if (saved && Store.usuario(saved)) {
-      this.user = Store.usuario(saved);
-      this.entrar();
-    } else {
+    Store.init();
+    // sessão persistente: se já logou antes, entra direto
+    Store.auth.onAuthStateChanged(u => {
+      if (u) {
+        const usuario = Store.usuarioPorEmail(u.email);
+        if (usuario) {
+          this.user = usuario;
+          this.iniciarTempoReal();
+          this.entrar();
+          return;
+        }
+      }
+      this.user = null;
       this.renderLogin();
-    }
+    });
+  },
+
+  iniciarTempoReal() {
+    Store.escutar(() => this.refresh());
+  },
+
+  refresh() {
+    // dados chegaram da nuvem: re-renderiza, sem atropelar quem está digitando
+    if (!this.user) return;
+    if (document.querySelector('.modal-bg')) return;
+    this.go(this.rota);
   },
 
   // ================= LOGIN =================
@@ -33,14 +51,40 @@ const App = {
   },
 
   login(id) {
-    this.user = Store.usuario(id);
-    sessionStorage.setItem('crm_tm_user', id);
-    this.entrar();
-    this.toast(`Bem-vindo(a), ${this.user.nome}! 💚`);
+    const u = Store.usuario(id);
+    this.modal(`
+      <h3>🔐 Entrar como ${esc(u.nome)}</h3>
+      <p class="muted">${esc(u.cargo)}</p>
+      <div class="fg" style="margin-top:14px"><label>Senha</label>
+        <input id="l_senha" type="password" placeholder="Digite sua senha"
+          onkeydown="if(event.key==='Enter')App.confirmarLogin('${id}')"></div>
+      <p id="l_erro" class="muted" style="color:var(--vermelho);margin-top:8px"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="App.fecharModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="App.confirmarLogin('${id}')">Entrar</button>
+      </div>`);
+    setTimeout(() => document.getElementById('l_senha')?.focus(), 100);
   },
 
-  logout() {
-    sessionStorage.removeItem('crm_tm_user');
+  async confirmarLogin(id) {
+    const senha = document.getElementById('l_senha').value;
+    const erro = document.getElementById('l_erro');
+    if (!senha) { erro.textContent = 'Digite a senha.'; return; }
+    erro.textContent = 'Entrando...';
+    try {
+      await Store.entrar(id, senha);
+      this.fecharModal();
+      this.toast(`Bem-vindo(a), ${Store.usuario(id).nome}! 💚`);
+      // onAuthStateChanged cuida do resto
+    } catch (e) {
+      erro.textContent = (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential')
+        ? 'Senha incorreta. Tente novamente.'
+        : 'Não foi possível entrar: ' + (e.message || e.code);
+    }
+  },
+
+  async logout() {
+    await Store.sair();
     location.reload();
   },
 
@@ -342,12 +386,13 @@ const App = {
     if (!selExt.disabled) { dados.extId = selExt.value || null; dados.intId = selInt.value || null; }
     else if (!id && this.user.papel === 'externo') { dados.extId = this.user.id; dados.intId = null; }
     else if (!id && this.user.papel === 'interno') { dados.intId = this.user.id; dados.extId = null; }
+    let cli;
     if (id) {
-      Object.assign(Store.cliente(id), dados);
+      cli = Object.assign({}, Store.cliente(id), dados);
     } else {
-      Store.db.clientes.push({ id: Store.nextId('cliente'), criadoEm: hoje(), ...dados });
+      cli = { id: Store.novoId(), criadoEm: hoje(), ...dados };
     }
-    Store.save();
+    Store.upsert('clientes', cli);
     this.fecharModal();
     this.go('clientes');
     this.toast('💾 Cliente salvo!');
@@ -357,8 +402,8 @@ const App = {
     const nOpps = Store.db.oportunidades.filter(o => o.clienteId === id).length;
     if (nOpps) return this.toast(`⚠️ Cliente tem ${nOpps} oportunidade(s). Exclua-as antes.`);
     if (!confirm('Excluir este cliente?')) return;
-    Store.db.clientes = Store.db.clientes.filter(c => c.id !== id);
-    Store.save(); this.fecharModal(); this.go('clientes');
+    Store.remove('clientes', id);
+    this.fecharModal(); this.go('clientes');
   },
 
   // ================= PIPELINE / OPORTUNIDADES =================
@@ -412,7 +457,7 @@ const App = {
     if (i < 0 || i >= ets.length) return;
     o.etapa = ets[i];
     o.ultimoContato = hoje();
-    Store.save();
+    Store.upsert('oportunidades', o);
     this.go('pipeline');
     this.toast(`➡️ "${o.titulo}" agora em ${o.etapa}`);
   },
@@ -466,9 +511,10 @@ const App = {
       proximoContato: document.getElementById('o_prox').value,
       obs: document.getElementById('o_obs').value.trim()
     };
-    if (id) Object.assign(Store.opp(id), dados);
-    else Store.db.oportunidades.push({ id: Store.nextId('opp'), dataCadastro: hoje(), resultado: null, ...dados });
-    Store.save();
+    let opp;
+    if (id) opp = Object.assign({}, Store.opp(id), dados);
+    else opp = { id: Store.novoId(), dataCadastro: hoje(), resultado: null, ...dados };
+    Store.upsert('oportunidades', opp);
     this.fecharModal();
     this.go('pipeline');
     this.toast('💾 Oportunidade salva!');
@@ -476,10 +522,8 @@ const App = {
 
   excluirOpp(id) {
     if (!confirm('Excluir esta oportunidade e suas interações/cotações?')) return;
-    Store.db.oportunidades = Store.db.oportunidades.filter(o => o.id !== id);
-    Store.db.interacoes = Store.db.interacoes.filter(i => i.oppId !== id);
-    Store.db.cotacoes = Store.db.cotacoes.filter(c => c.oppId !== id);
-    Store.save(); this.fecharModal(); this.go('pipeline');
+    Store.removeOppCascade(id);
+    this.fecharModal(); this.go('pipeline');
   },
 
   abrirOpp(id) {
@@ -525,7 +569,7 @@ const App = {
     o.resultado = resultado;
     o.dataFechamento = hoje();
     o.ultimoContato = hoje();
-    Store.save();
+    Store.upsert('oportunidades', o);
     this.fecharModal();
     this.go('pipeline');
     this.toast(resultado === 'ganho' ? '🏆 Cliente GANHO! É do Cruzeiro! 💙' : 'Registrado como perdido.');
@@ -535,7 +579,8 @@ const App = {
     const o = Store.opp(id);
     o.resultado = null; o.motivoPerda = ''; o.dataFechamento = null;
     if (o.etapa === 'Fechado') o.etapa = 'Proposta';
-    Store.save(); this.fecharModal(); this.go('pipeline');
+    Store.upsert('oportunidades', o);
+    this.fecharModal(); this.go('pipeline');
   },
 
   // ================= INTERAÇÕES =================
@@ -598,7 +643,7 @@ const App = {
     const data = document.getElementById('i_data').value;
     const oppId = +document.getElementById('i_opp').value || null;
     const int = {
-      id: Store.nextId('int'), data,
+      id: Store.novoId(), data,
       tipo: document.getElementById('i_tipo').value,
       clienteId: +document.getElementById('i_cliente').value,
       oppId, descricao: desc,
@@ -606,13 +651,13 @@ const App = {
       responsavelId: document.getElementById('i_resp').value,
       proximaAcao: document.getElementById('i_prox').value.trim()
     };
-    Store.db.interacoes.push(int);
+    Store.upsert('interacoes', int);
     if (oppId && document.getElementById('i_atualiza').checked) {
       const o = Store.opp(oppId);
       o.ultimoContato = data;
       o.proximoContato = addDias(data, Store.db.config.diasFollowUp);
+      Store.upsert('oportunidades', o);
     }
-    Store.save();
     this.fecharModal();
     this.go('interacoes');
     this.toast('💾 Interação registrada!');
@@ -658,7 +703,7 @@ const App = {
   mudarStatusCot(id, status) {
     const ct = Store.db.cotacoes.find(c => c.id === id);
     ct.status = status;
-    Store.save();
+    Store.upsert('cotacoes', ct);
     this.toast(`📄 ${ct.numero} → ${status}${status === 'Pedido' ? ' 🏆' : ''}`);
     this.go('cotacoes');
   },
@@ -683,14 +728,14 @@ const App = {
         <div class="fg"><label>Validade</label><input id="c_val" type="date" value="${ct.validade || addDias(hoje(), 30)}"></div>
       </div>
       <div class="modal-actions">
-        ${id ? `<button class="btn btn-danger" onclick="if(confirm('Excluir cotação?')){Store.db.cotacoes=Store.db.cotacoes.filter(c=>c.id!==${id});Store.save();App.fecharModal();App.go('cotacoes')}">Excluir</button>` : ''}
+        ${id ? `<button class="btn btn-danger" onclick="if(confirm('Excluir cotação?')){Store.remove('cotacoes',${id});App.fecharModal();App.go('cotacoes')}">Excluir</button>` : ''}
         <span class="spacer"></span>
         <button class="btn btn-ghost" onclick="App.fecharModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="App.salvarCotacao(${id || 'null'})">💾 Salvar</button>
       </div>`);
   },
 
-  salvarCotacao(id) {
+  async salvarCotacao(id) {
     const valor = +document.getElementById('c_valor').value;
     if (!valor) return this.toast('⚠️ Informe o valor');
     const dados = {
@@ -703,9 +748,17 @@ const App = {
       dataEnvio: document.getElementById('c_envio').value,
       validade: document.getElementById('c_val').value
     };
-    if (id) Object.assign(Store.db.cotacoes.find(c => c.id === id), dados);
-    else Store.db.cotacoes.push({ id: Store.db.seq.cot + 1, numero: Store.nextNumeroCotacao(), ...dados });
-    Store.save();
+    if (id) {
+      Store.upsert('cotacoes', Object.assign({}, Store.db.cotacoes.find(c => c.id === id), dados));
+    } else {
+      this.toast('Gerando número da cotação...');
+      try {
+        const numero = await Store.proximoNumeroCotacao();
+        Store.upsert('cotacoes', { id: Store.novoId(), numero, ...dados });
+      } catch (e) {
+        return this.toast('⚠️ Sem conexão — tente novamente para numerar a cotação');
+      }
+    }
     this.fecharModal();
     this.go('cotacoes');
     this.toast('💾 Cotação salva!');
@@ -965,17 +1018,17 @@ const App = {
     const v = inp.value.trim();
     if (!v) return;
     Store.db.config[key].push(v);
-    Store.save(); this.go('config'); this.toast('＋ Item adicionado');
+    Store.saveConfig(); this.go('config'); this.toast('＋ Item adicionado');
   },
 
   rmLista(key, i) {
     Store.db.config[key].splice(i, 1);
-    Store.save(); this.go('config');
+    Store.saveConfig(); this.go('config');
   },
 
   salvarMeta() {
     Store.db.config.metaMensal = +document.getElementById('cfg_meta').value || 0;
-    Store.save(); this.toast('🎯 Meta atualizada!');
+    Store.saveConfig(); this.toast('🎯 Meta atualizada!');
   },
 
   // ================= BUSCA GLOBAL =================

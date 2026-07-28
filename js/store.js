@@ -1,9 +1,19 @@
 /* ============================================================
-   CRM Tom Mittos 6.1 — Camada de dados (localStorage)
+   CRM Tom Mittos 6.1 — Camada de dados (Firebase / Firestore)
+   Tempo real + offline + login por e-mail/senha
    Grupo JMP — Pneumática · Hidráulica · Eletrônica
    ============================================================ */
 
-const DB_KEY = 'crm_tom_mittos_61';
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD-D_4PWT9KLFrxz1K_RsyjNxaSW6sZsfw",
+  authDomain: "crm-tom-mittos.firebaseapp.com",
+  projectId: "crm-tom-mittos",
+  storageBucket: "crm-tom-mittos.firebasestorage.app",
+  messagingSenderId: "790452905552",
+  appId: "1:790452905552:web:55e990f1c5c3b43ad39355"
+};
+
+const DOMINIO_LOGIN = 'crmtommittos.app';
 
 const SEED = {
   version: '6.1.0',
@@ -21,10 +31,6 @@ const SEED = {
     { id: 'julio',    nome: 'Júlio',    papel: 'diretor',  cargo: 'Diretor' },
     { id: 'bruno',    nome: 'Bruno',    papel: 'diretor',  cargo: 'Diretor' }
   ],
-  clientes: [],       // {id, empresa, cidade, regiao, segmento, obs, contatos:[{nome,setor,telefone,email}], criadoEm}
-  oportunidades: [],  // {id, titulo, clienteId, fabricante, responsavelId, etapa, prioridade, valor, dataCadastro, ultimoContato, proximoContato, obs, resultado, motivoPerda}
-  interacoes: [],     // {id, oppId, clienteId, data, tipo, descricao, responsavelId, proximaAcao}
-  cotacoes: [],       // {id, numero, oppId, clienteId, fabricante, responsavelId, valor, dataEnvio, validade, status}
   config: {
     etapas: ['Validado', 'Em contato', 'Diagnóstico', 'Visita Virtual', 'Visita Presencial', 'Proposta', 'Fechado'],
     statusCotacao: ['Aberto', 'Pendente', 'Pedido', 'Perdido'],
@@ -43,45 +49,127 @@ const SEED = {
     metaMensal: 1500000,
     diasFollowUp: 10,
     diasParado: 15
-  },
-  seq: { cliente: 0, opp: 0, int: 0, cot: 0 }
+  }
 };
+
+const COLECOES = ['clientes', 'oportunidades', 'interacoes', 'cotacoes'];
 
 const Store = {
   db: null,
+  fs: null,          // firestore
+  auth: null,
+  _unsubs: [],
+  pronto: false,     // primeiro carregamento concluído
 
-  load() {
-    try {
-      const raw = localStorage.getItem(DB_KEY);
-      if (raw) {
-        this.db = JSON.parse(raw);
-        // migração leve: garante chaves novas do seed
+  init() {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    this.auth = firebase.auth();
+    this.fs = firebase.firestore();
+    // cache offline: registra na mina sem sinal, sincroniza depois
+    this.fs.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+    this.db = {
+      version: SEED.version,
+      usuarios: SEED.usuarios,
+      clientes: [], oportunidades: [], interacoes: [], cotacoes: [],
+      config: JSON.parse(JSON.stringify(SEED.config))
+    };
+  },
+
+  emailDe(usuarioId) { return `${usuarioId}@${DOMINIO_LOGIN}`; },
+
+  usuarioPorEmail(email) {
+    const id = (email || '').split('@')[0];
+    return this.usuario(id);
+  },
+
+  async entrar(usuarioId, senha) {
+    await this.auth.signInWithEmailAndPassword(this.emailDe(usuarioId), senha);
+  },
+
+  async sair() {
+    this.pararEscuta();
+    await this.auth.signOut();
+  },
+
+  // ---------- escuta em tempo real ----------
+  escutar(onChange) {
+    this.pararEscuta();
+    let carregadas = 0;
+    COLECOES.forEach(col => {
+      const un = this.fs.collection(col).onSnapshot(snap => {
+        this.db[col] = snap.docs.map(d => d.data());
+        if (carregadas < COLECOES.length) carregadas++;
+        if (carregadas >= COLECOES.length) this.pronto = true;
+        onChange(col);
+      }, err => console.error('snapshot ' + col, err));
+      this._unsubs.push(un);
+    });
+    const unCfg = this.fs.doc('config/main').onSnapshot(snap => {
+      if (snap.exists) {
+        const cfg = snap.data();
         for (const k of Object.keys(SEED.config)) {
-          if (this.db.config[k] === undefined) this.db.config[k] = SEED.config[k];
+          if (cfg[k] !== undefined) this.db.config[k] = cfg[k];
         }
       } else {
-        this.db = JSON.parse(JSON.stringify(SEED));
-        this.save();
+        // primeiro acesso do projeto: semeia a configuração padrão
+        this.fs.doc('config/main').set(SEED.config).catch(() => {});
       }
-    } catch (e) {
-      console.error('Erro ao carregar dados', e);
-      this.db = JSON.parse(JSON.stringify(SEED));
-    }
-    return this.db;
+      onChange('config');
+    }, err => console.error('snapshot config', err));
+    this._unsubs.push(unCfg);
   },
 
-  save() {
-    localStorage.setItem(DB_KEY, JSON.stringify(this.db));
+  pararEscuta() {
+    this._unsubs.forEach(u => { try { u(); } catch (e) {} });
+    this._unsubs = [];
+    this.pronto = false;
   },
 
-  nextId(tipo) {
-    this.db.seq[tipo] = (this.db.seq[tipo] || 0) + 1;
-    return this.db.seq[tipo];
+  // ---------- gravação ----------
+  novoId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); },
+
+  upsert(col, obj) {
+    // espelho local imediato (o snapshot confirma em seguida)
+    const arr = this.db[col];
+    const i = arr.findIndex(x => x.id === obj.id);
+    if (i >= 0) arr[i] = obj; else arr.push(obj);
+    return this.fs.collection(col).doc(String(obj.id)).set(JSON.parse(JSON.stringify(obj)))
+      .catch(e => { console.error('upsert', col, e); App.toast('⚠️ Erro ao salvar na nuvem — verifique a internet'); });
   },
 
-  nextNumeroCotacao() {
+  remove(col, id) {
+    this.db[col] = this.db[col].filter(x => x.id !== id);
+    return this.fs.collection(col).doc(String(id)).delete()
+      .catch(e => console.error('remove', col, e));
+  },
+
+  removeOppCascade(oppId) {
+    const batch = this.fs.batch();
+    batch.delete(this.fs.collection('oportunidades').doc(String(oppId)));
+    this.db.interacoes.filter(i => i.oppId === oppId).forEach(i =>
+      batch.delete(this.fs.collection('interacoes').doc(String(i.id))));
+    this.db.cotacoes.filter(c => c.oppId === oppId).forEach(c =>
+      batch.delete(this.fs.collection('cotacoes').doc(String(c.id))));
+    this.db.oportunidades = this.db.oportunidades.filter(o => o.id !== oppId);
+    this.db.interacoes = this.db.interacoes.filter(i => i.oppId !== oppId);
+    this.db.cotacoes = this.db.cotacoes.filter(c => c.oppId !== oppId);
+    return batch.commit().catch(e => console.error('cascade', e));
+  },
+
+  saveConfig() {
+    return this.fs.doc('config/main').set(JSON.parse(JSON.stringify(this.db.config)))
+      .catch(e => console.error('config', e));
+  },
+
+  async proximoNumeroCotacao() {
     const ano = new Date().getFullYear();
-    const n = this.nextId('cot');
+    const ref = this.fs.doc('config/contadores');
+    const n = await this.fs.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      const atual = (snap.exists && snap.data()['cot' + ano]) || 0;
+      tx.set(ref, { ['cot' + ano]: atual + 1 }, { merge: true });
+      return atual + 1;
+    });
     return `COT-${ano}-${String(n).padStart(4, '0')}`;
   },
 
@@ -139,12 +227,20 @@ const Store = {
 
   importJSON(file, cb) {
     const r = new FileReader();
-    r.onload = () => {
+    r.onload = async () => {
       try {
         const data = JSON.parse(r.result);
-        if (!data.usuarios || !data.config) throw new Error('Arquivo inválido');
-        this.db = data;
-        this.save();
+        if (!data.config || (!data.clientes && !data.oportunidades)) throw new Error('Arquivo inválido');
+        let batch = this.fs.batch(), n = 0;
+        const commitSePreciso = async () => { if (n >= 400) { await batch.commit(); batch = this.fs.batch(); n = 0; } };
+        for (const col of COLECOES) {
+          for (const item of (data[col] || [])) {
+            batch.set(this.fs.collection(col).doc(String(item.id)), item); n++;
+            await commitSePreciso();
+          }
+        }
+        batch.set(this.fs.doc('config/main'), data.config); n++;
+        await batch.commit();
         cb(true);
       } catch (e) { cb(false, e.message); }
     };
@@ -154,8 +250,8 @@ const Store = {
   exportCSV(rows, nome) {
     if (!rows.length) return;
     const cols = Object.keys(rows[0]);
-    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const csv = '﻿' + [cols.join(';'), ...rows.map(r => cols.map(c => esc(r[c])).join(';'))].join('\r\n');
+    const escCsv = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = '﻿' + [cols.join(';'), ...rows.map(r => cols.map(c => escCsv(r[c])).join(';'))].join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
