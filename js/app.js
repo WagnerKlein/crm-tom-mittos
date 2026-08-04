@@ -909,7 +909,7 @@ const App = {
             <td>${esc(Store.cliente(o.clienteId)?.empresa || '—')}</td>
             <td>${esc(Store.usuario(o.responsavelId)?.nome || '—')}</td>
             <td><b>${fmtData(o.proximoContato)}</b></td>
-            <td><button class="btn btn-sm btn-accent" onclick="App.modalInteracao(null,${o.id})">Registrar contato</button></td></tr>`).join('')}</table></div>`
+            <td style="white-space:nowrap"><button class="btn btn-sm btn-accent" onclick="App.modalInteracao(null,${o.id})">Registrar contato</button> ${this.linkGoogleAgenda('Follow-up ' + o.titulo, o.proximoContato, 'Cliente: ' + (Store.cliente(o.clienteId)?.empresa || ''))}</td></tr>`).join('')}</table></div>`
           : '<p class="muted">Nada por aqui. ✅</p>'}
       </div>`;
     }).join('')}
@@ -920,6 +920,17 @@ const App = {
           <td><button class="btn btn-sm btn-accent" onclick="App.modalInteracao(null,${o.id})">Registrar contato</button></td></tr>`).join('')}</table></div>`
         : '<p class="muted">Funil todo atualizado. 💚</p>'}
     </div>`;
+  },
+
+  // ---- integração leve com Google Agenda (link pré-preenchido, sem API) ----
+  linkGoogleAgenda(titulo, dataISO, detalhes) {
+    const d = (dataISO || hoje()).replace(/-/g, '');
+    const fim = addDias(dataISO || hoje(), 1).replace(/-/g, '');
+    const url = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+      + '&text=' + encodeURIComponent('CRM TM 6.1: ' + titulo)
+      + '&dates=' + d + '/' + fim
+      + '&details=' + encodeURIComponent((detalhes || '') + '\n\nCriado pelo CRM Tom Mittos 6.1');
+    return `<a class="btn btn-sm btn-ghost" href="${url}" target="_blank" rel="noopener" title="Salvar na sua Google Agenda (abre com o evento pronto)">📅</a>`;
   },
 
   // ---- seções novas da agenda (reunião 04/08) ----
@@ -934,7 +945,7 @@ const App = {
           <td>${esc(Store.cliente(c.clienteId)?.empresa || '—')}</td>
           <td>${fmtMoeda(c.valor)}</td><td><b>${fmtData(c.validade)}</b></td>
           <td>${esc(Store.usuario(c.responsavelId)?.nome || '—')}</td>
-          <td><button class="btn btn-sm btn-accent" onclick="App.go('cotacoes')">Ir às cotações</button></td></tr>`).join('')}</table></div>`
+          <td style="white-space:nowrap"><button class="btn btn-sm btn-accent" onclick="App.go('cotacoes')">Ir às cotações</button> ${this.linkGoogleAgenda('Cotação ' + c.numero + ' vence!', c.validade, 'Cliente: ' + (Store.cliente(c.clienteId)?.empresa || '') + ' — ' + fmtMoeda(c.valor))}</td></tr>`).join('')}</table></div>`
         : '<p class="muted">Nenhum item em risco imediato de expiração. ✅</p>'}
     </div>`;
   },
@@ -965,7 +976,7 @@ const App = {
           <td>${esc(Store.usuario(l.responsavelId)?.nome || '—')}</td>
           <td><span class="chip ${prioNorm(l.prioridade).toLowerCase().replace('é', 'e')}">${esc(prioNorm(l.prioridade))}</span></td>
           <td>${atrasado ? `<span class="chip vencido">${fmtData(l.dataLimite)}</span>` : `<b>${fmtData(l.dataLimite)}</b>`}</td>
-          <td><button class="btn btn-sm btn-accent" onclick="App.concluirLembrete(${l.id})">✓ Concluir</button></td></tr>`;
+          <td style="white-space:nowrap"><button class="btn btn-sm btn-accent" onclick="App.concluirLembrete(${l.id})">✓ Concluir</button> ${this.linkGoogleAgenda(l.titulo, l.dataLimite, 'Responsável: ' + (Store.usuario(l.responsavelId)?.nome || ''))}</td></tr>`;
         }).join('')}</table></div>`
         : '<p class="muted">Nenhum lembrete ativo. Use "＋ Criar Lembrete / Alerta" para compromissos avulsos.</p>'}
     </div>`;
