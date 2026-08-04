@@ -56,7 +56,7 @@ const SEED = {
   }
 };
 
-const COLECOES = ['clientes', 'oportunidades', 'interacoes', 'cotacoes', 'lembretes'];
+const COLECOES = ['clientes', 'oportunidades', 'interacoes', 'cotacoes', 'lembretes', 'perfis'];
 
 const Store = {
   db: null,
@@ -74,7 +74,7 @@ const Store = {
     this.db = {
       version: SEED.version,
       usuarios: SEED.usuarios,
-      clientes: [], oportunidades: [], interacoes: [], cotacoes: [], lembretes: [],
+      clientes: [], oportunidades: [], interacoes: [], cotacoes: [], lembretes: [], perfis: [],
       config: JSON.parse(JSON.stringify(SEED.config))
     };
   },
@@ -183,6 +183,8 @@ const Store = {
     o.historico.push({ em: new Date().toISOString(), por: usuarioId, texto });
     if (o.historico.length > 100) o.historico.splice(0, o.historico.length - 100);
   },
+
+  fotoDe(usuarioId) { return (this.db.perfis.find(p => p.id === usuarioId) || {}).foto || null; },
 
   // ---------- helpers de consulta ----------
   usuario(id) { return this.db.usuarios.find(u => u.id === id); },

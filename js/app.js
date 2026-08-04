@@ -48,8 +48,36 @@ const App = {
   refresh() {
     // dados chegaram da nuvem: re-renderiza, sem atropelar quem está digitando
     if (!this.user) return;
+    this.pintarAvatar();
     if (document.querySelector('.modal-bg')) return;
     this.go(this.rota);
+  },
+
+  uploadFoto(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      const lado = 128;
+      cv.width = lado; cv.height = lado;
+      const ctx = cv.getContext('2d');
+      const m = Math.min(img.width, img.height);
+      ctx.drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, lado, lado);
+      const foto = cv.toDataURL('image/jpeg', 0.82);
+      Store.upsert('perfis', { id: this.user.id, foto, atualizadoEm: hoje() });
+      this.pintarAvatar();
+      this.go('config');
+      this.toast('📸 Foto de perfil atualizada!');
+    };
+    img.src = URL.createObjectURL(file);
+  },
+
+  removerFoto() {
+    Store.remove('perfis', this.user.id);
+    this.pintarAvatar();
+    this.go('config');
+    this.toast('Foto removida.');
   },
 
   // ================= LOGIN =================
@@ -104,32 +132,44 @@ const App = {
     location.reload();
   },
 
+  pintarAvatar() {
+    if (!this.user) return;
+    const av = document.getElementById('userAvatar');
+    const foto = Store.fotoDe(this.user.id);
+    av.className = `avatar ${this.user.papel}`;
+    av.innerHTML = foto ? `<img src="${foto}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : this.user.nome[0];
+  },
+
   entrar() {
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     document.getElementById('userName').textContent = this.user.nome;
     document.getElementById('userRole').textContent = this.user.cargo;
-    const av = document.getElementById('userAvatar');
-    av.textContent = this.user.nome[0];
-    av.className = `avatar ${this.user.papel}`;
+    this.pintarAvatar();
     this.renderNav();
-    this.go(this.user.papel === 'diretor' ? 'executivo' : 'painel');
+    this.go(this.user.papel === 'diretor' ? 'executivo' : this.user.papel === 'gerente' ? 'painel' : 'pipeline');
   },
 
   // ================= NAVEGAÇÃO =================
+  rotasGestao: ['painel', 'comercial', 'crescimento', 'executivo', 'relatorios'],
+
   renderNav() {
+    const gestor = Store.podeVerTudo(this.user);
     const itens = [
       { sec: 'Operacional' },
-      { id: 'painel',     ico: '🧭', t: 'Painel de Reunião' },
       { id: 'clientes',   ico: '🏭', t: 'Clientes & Contatos' },
       { id: 'pipeline',   ico: '📈', t: 'Funil de Oportunidades' },
       { id: 'interacoes', ico: '📚', t: 'Interações & Visitas' },
       { id: 'cotacoes',   ico: '📄', t: 'Cotações' },
       { id: 'agenda',     ico: '📅', t: 'Agenda Inteligente' },
-      { sec: 'Gestão' },
-      { id: 'comercial',  ico: '📊', t: 'Dashboard Comercial' },
-      { id: 'executivo',  ico: '🏆', t: 'Dashboard Executivo' },
-      { id: 'relatorios', ico: '🗂', t: 'Relatórios' },
+      ...(gestor ? [
+        { sec: 'Dashboards & Gestão' },
+        { id: 'painel',      ico: '🧭', t: 'Painel de Reunião' },
+        { id: 'comercial',   ico: '📊', t: 'Dashboard Comercial' },
+        { id: 'crescimento', ico: '🌍', t: 'Crescimento por Região' },
+        { id: 'executivo',   ico: '🏆', t: 'Dashboard Executivo' },
+        { id: 'relatorios',  ico: '🗂', t: 'Relatórios' }
+      ] : []),
       { sec: 'Sistema' },
       { id: 'config',     ico: '⚙️', t: 'Configurações' }
     ];
@@ -140,16 +180,18 @@ const App = {
   },
 
   go(rota) {
+    // visão gerencial é restrita ("cada um cuida do seu jardim" — reunião 04/08)
+    if (this.rotasGestao.includes(rota) && !Store.podeVerTudo(this.user)) rota = 'pipeline';
     this.rota = rota;
     document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.r === rota));
     document.getElementById('sidebar').classList.remove('open');
     const views = {
       painel: this.vPainel, clientes: this.vClientes, pipeline: this.vPipeline,
       interacoes: this.vInteracoes, cotacoes: this.vCotacoes, agenda: this.vAgenda,
-      comercial: this.vComercial, executivo: this.vExecutivo, relatorios: this.vRelatorios,
-      config: this.vConfig
+      comercial: this.vComercial, crescimento: this.vCrescimento, executivo: this.vExecutivo,
+      relatorios: this.vRelatorios, config: this.vConfig
     };
-    document.getElementById('view').innerHTML = (views[rota] || this.vPainel).call(this);
+    document.getElementById('view').innerHTML = (views[rota] || this.vPipeline).call(this);
     this.updateAlertas();
     window.scrollTo(0, 0);
   },
@@ -971,13 +1013,15 @@ const App = {
     this.toast('✓ Lembrete concluído!');
   },
 
-  // ================= DASHBOARD COMERCIAL =================
-  vComercial() {
-    const opps = this.aplicaFiltros(Store.oppsVisiveis(this.user));
+  // ================= DASHBOARD COMERCIAL (com abas) =================
+  abaCom: 'geral',
+  setAbaCom(a) { this.abaCom = a; this.go('comercial'); },
+
+  linhasEquipe(opps) {
     const vendedores = Store.podeVerTudo(this.user)
       ? Store.db.usuarios.filter(u => u.papel !== 'diretor')
       : [this.user];
-    const linhas = vendedores.map(u => {
+    return vendedores.map(u => {
       const minhas = opps.filter(o => o.responsavelId === u.id);
       const ativas = minhas.filter(o => !o.resultado);
       const ganhas = minhas.filter(o => o.resultado === 'ganho');
@@ -993,10 +1037,87 @@ const App = {
         valorGanho: ganhas.reduce((s, o) => s + (o.valor || 0), 0)
       };
     }).sort((a, b) => b.valorGanho - a.valorGanho || b.valorAtivo - a.valorAtivo);
-    const maxG = Math.max(...linhas.map(l => l.valorGanho), 1);
+  },
+
+  vComercial() {
+    const abas = [
+      { k: 'geral', t: '📈 Visão Geral' },
+      { k: 'fabricante', t: '🏭 Prospecção por Fabricante' },
+      { k: 'ranking', t: '🏅 Rankings da Equipe' },
+      { k: 'individual', t: '👤 Performance Individual' }
+    ];
+    const barraAbas = `<div class="abas">${abas.map(a =>
+      `<button class="aba ${this.abaCom === a.k ? 'ativa' : ''}" onclick="App.setAbaCom('${a.k}')">${a.t}</button>`).join('')}</div>`;
+    const corpo = {
+      geral: () => this.abaGeral(),
+      fabricante: () => this.abaFabricante(),
+      ranking: () => this.abaRanking(),
+      individual: () => this.abaIndividual()
+    }[this.abaCom]();
     return `
-    <div class="page-head"><h2>📊 Dashboard Comercial — Performance da Equipe</h2></div>
+    <div class="page-head"><h2>📊 Dashboard Comercial & Prospecção</h2>
+      <div class="sub">Análise por fabricante, rankings e performance — segmentável por região, vendedor e produto</div></div>
+    ${barraAbas}
     ${this.filtrosHTML()}
+    ${corpo}`;
+  },
+
+  abaGeral() {
+    const opps = this.aplicaFiltros(Store.oppsVisiveis(this.user));
+    const ativas = opps.filter(o => !o.resultado);
+    const fabsAtivos = new Set(ativas.map(o => o.fabricante).filter(Boolean));
+    const linhas = this.linhasEquipe(opps);
+    const lider = linhas[0];
+    const vencidos = ativas.filter(o => this.agendaDe(o) === 'vencido').length;
+    return `
+    <div class="cards">
+      <div class="kpi"><div class="label">Leads em prospecção</div><div class="valor">${ativas.length}</div><div class="extra">em acompanhamento ativo</div></div>
+      <div class="kpi"><div class="label">Pipeline comercial</div><div class="valor">${fmtMoeda(ativas.reduce((s, o) => s + (o.valor || 0), 0))}</div><div class="extra">${ativas.length} oportunidades</div></div>
+      <div class="kpi ${vencidos ? 'alerta' : ''}"><div class="label">Follow-ups atrasados</div><div class="valor">${vencidos}</div><div class="extra">na seleção atual</div></div>
+      <div class="kpi"><div class="label">Fabricantes ativos</div><div class="valor">${fabsAtivos.size}</div><div class="extra">linhas em movimento</div></div>
+      <div class="kpi"><div class="label">Líder do ranking</div><div class="valor" style="font-size:1.1rem">${lider ? esc(lider.u.nome) : '—'}</div><div class="extra">${lider ? fmtMoeda(lider.valorGanho) + ' fechados' : ''}</div></div>
+    </div>
+    ${this.abaRankingResumo(linhas)}`;
+  },
+
+  abaRankingResumo(linhas) {
+    const maxG = Math.max(...linhas.map(l => l.valorGanho), 1);
+    return `<div class="panel"><h3>💰 Valor ganho por vendedor</h3>
+      ${linhas.filter(l => l.valorGanho > 0).map(l => `<div class="bar-row"><div class="lbl">${esc(l.u.nome)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(l.valorGanho / maxG * 100)}%"></div></div>
+        <div class="bar-val">${fmtMoeda(l.valorGanho)}</div></div>`).join('') || '<p class="muted">Nenhum fechamento ainda — bora pra cima! ⚽</p>'}
+    </div>`;
+  },
+
+  abaFabricante() {
+    const opps = this.aplicaFiltros(Store.oppsVisiveis(this.user));
+    const cards = Store.db.config.fabricantes.map(fab => {
+      const doFab = opps.filter(o => o.fabricante === fab);
+      const ativas = doFab.filter(o => !o.resultado);
+      const atrasados = ativas.filter(o => this.agendaDe(o) === 'vencido').length;
+      const porVend = {};
+      doFab.forEach(o => { porVend[o.responsavelId] = (porVend[o.responsavelId] || 0) + 1; });
+      const principal = Object.entries(porVend).sort((a, b) => b[1] - a[1])[0];
+      const segs = {};
+      doFab.forEach(o => { const s = Store.cliente(o.clienteId)?.segmento; if (s) segs[s] = (segs[s] || 0) + 1; });
+      const topSegs = Object.entries(segs).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]);
+      return { fab, leads: ativas.length, atrasados, pipe: ativas.reduce((s, o) => s + (o.valor || 0), 0), principal, topSegs, total: doFab.length };
+    }).filter(c => c.total > 0);
+    return cards.length ? `<div class="cards-fab">${cards.map(c => `
+      <div class="panel fab-card">
+        <div class="fab-head"><b>${esc(c.fab)}</b><span class="chip aberto">${c.leads} leads</span></div>
+        <p class="fab-linha">Follow-ups atrasados: <b style="color:${c.atrasados ? 'var(--vermelho)' : 'inherit'}">${c.atrasados}</b></p>
+        <p class="fab-linha">Pipeline gerado: <b>${fmtMoeda(c.pipe)}</b></p>
+        <p class="fab-linha">Principal vendedor: <b>${c.principal ? esc(Store.usuario(c.principal[0])?.nome || '—') : '—'}</b></p>
+        ${c.topSegs.length ? `<p class="fab-linha muted">Top segmentos: ${c.topSegs.map(s => `<span class="chip et0">${esc(s)}</span>`).join(' ')}</p>` : ''}
+      </div>`).join('')}</div>`
+      : '<div class="panel"><p class="muted">Nenhuma oportunidade na seleção atual.</p></div>';
+  },
+
+  abaRanking() {
+    const opps = this.aplicaFiltros(Store.oppsVisiveis(this.user));
+    const linhas = this.linhasEquipe(opps);
+    return `
     <div class="panel"><h3>🏅 Ranking de colaboradores</h3>
       <div class="table-wrap"><table>
         <tr><th>#</th><th>Vendedor</th><th>Perfil</th><th>Ativas</th><th>Pipeline (R$)</th><th>Interações</th><th>Visitas</th><th>Ganhas</th><th>Perdidas</th><th>Conversão</th><th>Valor ganho</th></tr>
@@ -1008,11 +1129,92 @@ const App = {
           <td>${fmtPct(l.conv)}</td><td><b>${fmtMoeda(l.valorGanho)}</b></td></tr>`).join('')}
       </table></div>
     </div>
-    <div class="panel"><h3>💰 Valor ganho por vendedor</h3>
-      ${linhas.filter(l => l.valorGanho > 0).map(l => `<div class="bar-row"><div class="lbl">${esc(l.u.nome)}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(l.valorGanho / maxG * 100)}%"></div></div>
-        <div class="bar-val">${fmtMoeda(l.valorGanho)}</div></div>`).join('') || '<p class="muted">Nenhum fechamento ainda — bora pra cima! ⚽</p>'}
+    ${this.abaRankingResumo(linhas)}`;
+  },
+
+  abaIndividual() {
+    const vendedores = Store.db.usuarios.filter(u => u.papel !== 'diretor');
+    const sel = this.vendIndividual || (Store.podeVerTudo(this.user) ? vendedores[0].id : this.user.id);
+    const u = Store.usuario(sel);
+    const opps = this.aplicaFiltros(Store.oppsVisiveis(this.user)).filter(o => o.responsavelId === sel);
+    const ativas = opps.filter(o => !o.resultado);
+    const ganhas = opps.filter(o => o.resultado === 'ganho');
+    const fechadas = ganhas.length + opps.filter(o => o.resultado === 'perdido').length;
+    const ints = Store.db.interacoes.filter(i => i.responsavelId === sel).sort((a, b) => b.data.localeCompare(a.data));
+    const visitas = ints.filter(i => i.tipo.startsWith('Visita'));
+    return `
+    <div class="panel"><h3>👤 Performance individual</h3>
+      <select onchange="App.vendIndividual=this.value;App.go('comercial')" style="padding:8px;border:1px solid var(--borda);border-radius:9px;margin-bottom:12px" ${Store.podeVerTudo(this.user) ? '' : 'disabled'}>
+        ${vendedores.map(v => `<option value="${v.id}" ${v.id === sel ? 'selected' : ''}>${esc(v.nome)} — ${esc(v.cargo)}</option>`).join('')}
+      </select>
+      <div class="cards">
+        <div class="kpi"><div class="label">Oportunidades ativas</div><div class="valor">${ativas.length}</div><div class="extra">${fmtMoeda(ativas.reduce((s, o) => s + (o.valor || 0), 0))}</div></div>
+        <div class="kpi"><div class="label">Interações registradas</div><div class="valor">${ints.length}</div><div class="extra">${visitas.length} visitas</div></div>
+        <div class="kpi"><div class="label">Conversão</div><div class="valor">${fmtPct(fechadas ? ganhas.length / fechadas : 0)}</div><div class="extra">${ganhas.length} ganhas / ${fechadas} fechadas</div></div>
+        <div class="kpi"><div class="label">Valor fechado</div><div class="valor">${fmtMoeda(ganhas.reduce((s, o) => s + (o.valor || 0), 0))}</div><div class="extra">total ganho</div></div>
+      </div>
+      <h3 style="margin-top:8px">📚 Últimas interações de ${esc(u?.nome || '')}</h3>
+      ${ints.length ? `<ul class="timeline">${ints.slice(0, 6).map(i => `<li><div class="quando">${fmtData(i.data)} · ${esc(i.tipo)}</div>${esc(i.descricao.slice(0, 90))}</li>`).join('')}</ul>` : '<p class="muted">Nenhuma interação.</p>'}
     </div>`;
+  },
+
+  // ================= CRESCIMENTO POR REGIÃO =================
+  perCresc: 'tri',
+  setPerCresc(p) { this.perCresc = p; this.go('crescimento'); },
+
+  vCrescimento() {
+    const cfg = Store.db.config;
+    const inicio = { mes: hoje().slice(0, 7) + '-01', tri: (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 2); return d.toISOString().slice(0, 10); })(), ano: hoje().slice(0, 4) + '-01-01' }[this.perCresc];
+    const perLbl = { mes: 'Mês', tri: 'Trimestre', ano: 'Ano' };
+    const cots = Store.db.cotacoes.filter(c => Store.cotVisivel(c, this.user) && (c.dataEnvio || '') >= inicio);
+    const regioes = [...cfg.regioes];
+    const dados = regioes.map(reg => {
+      const clsReg = Store.db.clientes.filter(c => c.regiao === reg).map(c => c.id);
+      const cotsReg = cots.filter(c => clsReg.includes(c.clienteId));
+      const pedidos = cotsReg.filter(c => c.status === 'Pedido');
+      const porVend = {};
+      cotsReg.forEach(c => { porVend[c.responsavelId] = (porVend[c.responsavelId] || 0) + 1; });
+      const resp = Object.entries(porVend).sort((a, b) => b[1] - a[1])[0];
+      return {
+        reg, leads: clsReg.length,
+        emitidas: cotsReg.reduce((s, c) => s + (c.valor || 0), 0), nEmitidas: cotsReg.length,
+        aprovadas: pedidos.reduce((s, c) => s + (c.valor || 0), 0), nAprovadas: pedidos.length,
+        conv: cotsReg.length ? pedidos.length / cotsReg.length : 0,
+        resp: resp ? Store.usuario(resp[0])?.nome : null
+      };
+    }).filter(d => d.leads || d.nEmitidas);
+    const lider = [...dados].sort((a, b) => b.aprovadas - a.aprovadas || b.emitidas - a.emitidas)[0];
+    const totEmit = dados.reduce((s, d) => s + d.emitidas, 0);
+    const totAprov = dados.reduce((s, d) => s + d.aprovadas, 0);
+    const maxE = Math.max(...dados.map(d => d.emitidas), 1);
+    return `
+    <div class="page-head"><h2>🌍 Dashboard de Crescimento por Região</h2>
+      <div class="sub">Prospecção, propostas e vendas fechadas por região geográfica</div>
+      <span class="spacer"></span>
+      <div class="abas" style="margin:0">${['mes', 'tri', 'ano'].map(p =>
+        `<button class="aba ${this.perCresc === p ? 'ativa' : ''}" onclick="App.setPerCresc('${p}')">${perLbl[p]}</button>`).join('')}</div></div>
+    <div class="cards">
+      <div class="kpi"><div class="label">Volume de propostas</div><div class="valor">${fmtMoeda(totEmit)}</div><div class="extra">${dados.length} regiões com movimento no ${perLbl[this.perCresc].toLowerCase()}</div></div>
+      <div class="kpi"><div class="label">Vendas aprovadas</div><div class="valor" style="color:var(--lime)">${fmtMoeda(totAprov)}</div><div class="extra">propostas convertidas em pedidos</div></div>
+      <div class="kpi"><div class="label">Região líder de vendas</div><div class="valor" style="font-size:1.05rem">${lider ? esc(lider.reg) : '—'}</div><div class="extra">${lider ? fmtMoeda(lider.aprovadas) + ' em aprovações' : 'sem dados no período'}</div></div>
+      <div class="kpi"><div class="label">Base territorial</div><div class="valor">${Store.db.clientes.length}</div><div class="extra">clientes no mapa regional</div></div>
+    </div>
+    ${dados.length ? `<div class="cards-fab">${dados.map(d => `
+      <div class="panel fab-card">
+        <div class="fab-head"><b>${esc(d.reg)}</b><span class="chip aberto">${d.leads} clientes</span></div>
+        <p class="fab-linha">Propostas: <b>${fmtMoeda(d.emitidas)}</b> <span class="muted">(${d.nEmitidas})</span></p>
+        <p class="fab-linha">Aprovadas: <b style="color:var(--verde)">${fmtMoeda(d.aprovadas)}</b> <span class="muted">(${d.nAprovadas})</span></p>
+        <p class="fab-linha">Conversão: <b>${fmtPct(d.conv)}</b> · Resp: <b>${esc(d.resp || 'N/A')}</b></p>
+      </div>`).join('')}</div>
+    <div class="panel"><h3>📊 Propostas × Aprovações por região (${perLbl[this.perCresc]})</h3>
+      ${dados.map(d => `
+        <div class="bar-row"><div class="lbl">${esc(d.reg)}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round(d.emitidas / maxE * 100)}%"></div></div>
+          <div class="bar-val">${fmtMoeda(d.emitidas)}</div></div>
+        <div class="bar-row" style="margin-top:-4px"><div class="lbl muted">↳ aprovadas (${fmtPct(d.conv)})</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round(d.aprovadas / maxE * 100)}%;background:var(--lime)"></div></div>
+          <div class="bar-val" style="color:var(--lime)">${fmtMoeda(d.aprovadas)}</div></div>`).join('')}
+    </div>` : '<div class="panel"><p class="muted">Sem movimento de propostas no período selecionado.</p></div>'}`;
   },
 
   // ================= DASHBOARD EXECUTIVO =================
@@ -1162,7 +1364,18 @@ const App = {
       </div>`;
     return `
     <div class="page-head"><h2>⚙️ Configurações</h2>
-      <div class="sub">Listas do sistema — os novos itens aparecem automaticamente nos formulários e filtros</div></div>
+      <div class="sub">Perfil, listas do sistema e ferramentas — os novos itens aparecem automaticamente nos formulários</div></div>
+    <div class="panel"><h3>👤 Meu Perfil</h3>
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <div class="avatar ${this.user.papel}" style="width:64px;height:64px;font-size:1.4rem">${Store.fotoDe(this.user.id) ? `<img src="${Store.fotoDe(this.user.id)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : this.user.nome[0]}</div>
+        <div>
+          <p><b>${esc(this.user.nome)}</b> — ${esc(this.user.cargo)}</p>
+          <p class="muted" style="margin-bottom:8px">${esc(Store.emailDe(this.user.id))}</p>
+          <label class="btn btn-sm btn-primary" style="cursor:pointer">📸 Adicionar / Alterar foto<input type="file" accept="image/*" hidden onchange="App.uploadFoto(this)"></label>
+          ${Store.fotoDe(this.user.id) ? `<button class="btn btn-sm btn-ghost" onclick="App.removerFoto()">Remover foto</button>` : ''}
+        </div>
+      </div>
+    </div>
     <div class="panel"><h3>🎯 Meta mensal da equipe</h3>
       <div style="display:flex;gap:8px;align-items:center">
         <input id="cfg_meta" type="number" value="${cfg.metaMensal}" style="padding:9px;border:1px solid var(--borda);border-radius:9px;width:200px">
