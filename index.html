@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>CRM Tom Mittos 6.1</title>
 <meta http-equiv="cache-control" content="no-cache">
-<link rel="stylesheet" href="css/style.css?v=613">
+<link rel="stylesheet" href="css/style.css?v=615">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -40,7 +40,7 @@
 
       <div>
         <div class="brand-name">CRM Tom Mittos</div>
-        <div class="brand-v v61" title="6x1 — Nós somos o Cruzeiro! 💙⚽">v6.1</div>
+        <div class="brand-v v61" title="6x1 — Nós somos o Cruzeiro! A versão é eterna! 💙⚽">v6.1 A</div>
       </div>
     </div>
     <button class="btn btn-accent side-new" onclick="App.novaOportunidade()">＋ Nova Oportunidade</button>
@@ -59,7 +59,9 @@
     <header class="topbar">
       <button class="btn-icon menu-btn" onclick="App.toggleMenu()">☰</button>
       <input id="globalSearch" class="search" type="search" placeholder="Buscar clientes, oportunidades, cotações..." oninput="App.globalSearch(this.value)">
-      <div id="alertBadge" class="alert-badge hidden" onclick="App.go('agenda')">🔔 <span id="alertCount"></span></div>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn btn-sm btn-ghost" title="Recarregar dados" onclick="App.go(App.rota);App.toast('🔄 Atualizado!')">⟳ Atualizar</button>
+      <div id="alertBadge" class="alert-badge hidden" onclick="App.go('agenda')">⚠️ <span id="alertCount"></span></div>
     </header>
     <main id="view" class="view"></main>
   </div>
@@ -71,7 +73,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<script src="js/store.js?v=613"></script>
-<script src="js/app.js?v=613"></script>
+<script src="js/store.js?v=615"></script>
+<script src="js/app.js?v=615"></script>
 </body>
 </html>

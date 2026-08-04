@@ -43,16 +43,20 @@ const SEED = {
     segmentos: ['Mineração', 'Siderurgia', 'Metalurgia', 'Construção Civil', 'Agronegócio',
       'Logística/Transporte', 'Indústria Alimentícia', 'Automotivo', 'Papel e Celulose', 'Energia', 'Outros'],
     setores: ['Compras', 'Engenharia', 'PCM', 'Instrumentação', 'Manutenção', 'Operação', 'Suprimentos', 'Diretoria'],
-    regioes: ['Parauapebas - PA', 'Belém - PA', 'São Luís - MA', 'Contagem - MG (Sede)', 'Serra - ES', 'Outras'],
+    regioes: ['Parauapebas - PA', 'Belém - PA', 'São Luís - MA', 'Serra - ES',
+      'Metropolitana - MG', 'Centro-Oeste - MG', 'Sul de Minas - MG', 'Triângulo Mineiro - MG', 'Outras'],
     tiposInteracao: ['Ligação', 'E-mail', 'WhatsApp', 'Reunião', 'Visita Presencial', 'Visita Virtual', 'Visita Técnica'],
-    prioridades: ['Alta', 'Média', 'Baixa'],
+    prioridades: ['Alta', 'Média'],
     metaMensal: 1500000,
     diasFollowUp: 10,
-    diasParado: 15
+    diasParado: 15,
+    diasUteisPipeline: 5,   // follow-up de prospecção/pipeline (dias ÚTEIS)
+    diasUteisProposta: 3,   // follow-up após emissão de proposta (dias ÚTEIS)
+    diasPrevencao: 2        // alerta preventivo antes da validade da cotação
   }
 };
 
-const COLECOES = ['clientes', 'oportunidades', 'interacoes', 'cotacoes'];
+const COLECOES = ['clientes', 'oportunidades', 'interacoes', 'cotacoes', 'lembretes'];
 
 const Store = {
   db: null,
@@ -70,7 +74,7 @@ const Store = {
     this.db = {
       version: SEED.version,
       usuarios: SEED.usuarios,
-      clientes: [], oportunidades: [], interacoes: [], cotacoes: [],
+      clientes: [], oportunidades: [], interacoes: [], cotacoes: [], lembretes: [],
       config: JSON.parse(JSON.stringify(SEED.config))
     };
   },
@@ -173,6 +177,13 @@ const Store = {
     return `COT-${ano}-${String(n).padStart(4, '0')}`;
   },
 
+  // ---------- histórico de alterações por oportunidade ----------
+  logOpp(o, texto, usuarioId) {
+    o.historico = o.historico || [];
+    o.historico.push({ em: new Date().toISOString(), por: usuarioId, texto });
+    if (o.historico.length > 100) o.historico.splice(0, o.historico.length - 100);
+  },
+
   // ---------- helpers de consulta ----------
   usuario(id) { return this.db.usuarios.find(u => u.id === id); },
   cliente(id) { return this.db.clientes.find(c => c.id === id); },
@@ -272,6 +283,20 @@ function addDias(dataISO, dias) {
 function diasEntre(a, b) { // b - a em dias
   return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
 }
+
+function addDiasUteis(dataISO, dias) { // pula sábados e domingos
+  const d = new Date(dataISO + 'T12:00:00');
+  let n = 0;
+  while (n < dias) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) n++;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+// prioridade "Baixa" foi extinta (reunião 04/08): exibe/conta como Média
+function prioNorm(p) { return p === 'Baixa' ? 'Média' : (p || 'Média'); }
 
 function fmtData(iso) {
   if (!iso) return '—';

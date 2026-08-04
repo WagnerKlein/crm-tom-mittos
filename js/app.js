@@ -27,6 +27,22 @@ const App = {
 
   iniciarTempoReal() {
     Store.escutar(() => this.refresh());
+    // migração 6.1A (reunião 04/08): gerência atualiza a configuração compartilhada uma única vez
+    setTimeout(() => this.migrarConfig61A(), 4000);
+  },
+
+  migrarConfig61A() {
+    if (!this.user || !Store.podeVerTudo(this.user)) return;
+    const cfg = Store.db.config;
+    let mudou = false;
+    if ((cfg.prioridades || []).includes('Baixa')) { cfg.prioridades = ['Alta', 'Média']; mudou = true; }
+    ['Metropolitana - MG', 'Centro-Oeste - MG', 'Sul de Minas - MG', 'Triângulo Mineiro - MG'].forEach(r => {
+      if (!(cfg.regioes || []).includes(r)) { cfg.regioes.push(r); mudou = true; }
+    });
+    if (!cfg.diasUteisPipeline) { cfg.diasUteisPipeline = 5; mudou = true; }
+    if (!cfg.diasUteisProposta) { cfg.diasUteisProposta = 3; mudou = true; }
+    if (!cfg.diasPrevencao) { cfg.diasPrevencao = 2; mudou = true; }
+    if (mudou) { Store.saveConfig(); console.log('config migrada p/ 6.1A'); }
   },
 
   refresh() {
@@ -166,13 +182,39 @@ const App = {
     return o.ultimoContato ? diasEntre(o.ultimoContato, hoje()) : diasEntre(o.dataCadastro, hoje());
   },
 
+  // cotações abertas com validade até N dias à frente (alerta preventivo do Tom)
+  cotacoesPrevencao() {
+    const cfg = Store.db.config;
+    const limite = addDias(hoje(), cfg.diasPrevencao || 2);
+    return Store.db.cotacoes.filter(c =>
+      (c.status === 'Aberto' || c.status === 'Pendente') &&
+      Store.cotVisivel(c, this.user) &&
+      c.validade && c.validade <= limite && c.validade >= hoje());
+  },
+
+  // cotações emitidas há 3+ dias úteis sem definição (follow-up de proposta)
+  cotacoesFollowUp() {
+    const cfg = Store.db.config;
+    return Store.db.cotacoes.filter(c =>
+      (c.status === 'Aberto' || c.status === 'Pendente') &&
+      Store.cotVisivel(c, this.user) &&
+      c.dataEnvio && addDiasUteis(c.dataEnvio, cfg.diasUteisProposta || 3) <= hoje());
+  },
+
+  lembretesAtivos() {
+    return Store.db.lembretes.filter(l => !l.feito &&
+      (Store.podeVerTudo(this.user) || l.responsavelId === this.user.id));
+  },
+
   updateAlertas() {
     const venc = this.oppsAtivas().filter(o => this.agendaDe(o) === 'vencido').length;
     const hj = this.oppsAtivas().filter(o => this.agendaDe(o) === 'hoje').length;
+    const prev = this.cotacoesPrevencao().length;
+    const lemb = this.lembretesAtivos().filter(l => l.dataLimite && l.dataLimite <= hoje()).length;
     const badge = document.getElementById('alertBadge');
-    const n = venc + hj;
+    const n = venc + hj + prev + lemb;
     badge.classList.toggle('hidden', n === 0);
-    document.getElementById('alertCount').textContent = `${n} follow-up${n > 1 ? 's' : ''}`;
+    document.getElementById('alertCount').textContent = `Agenda ${n}`;
   },
 
   aplicaFiltros(lista) {
@@ -305,8 +347,8 @@ const App = {
       <p class="muted">Carteira — Externo: <b>${c.extId ? esc(Store.usuario(c.extId)?.nome || '') : 'livre'}</b> · Interno: <b>${c.intId ? esc(Store.usuario(c.intId)?.nome || '') : 'livre'}</b></p>
       ${c.obs ? `<p style="margin:8px 0">${esc(c.obs)}</p>` : ''}
       <div class="panel" style="margin-top:12px"><h3>👥 Contatos mapeados</h3>
-        ${(c.contatos || []).length ? `<div class="table-wrap"><table><tr><th>Nome</th><th>Setor</th><th>Telefone</th><th>E-mail</th></tr>
-          ${c.contatos.map(ct => `<tr><td>${esc(ct.nome)}</td><td>${esc(ct.setor || '—')}</td><td>${esc(ct.telefone || '—')}</td><td>${esc(ct.email || '—')}</td></tr>`).join('')}</table></div>`
+        ${(c.contatos || []).length ? `<div class="table-wrap"><table><tr><th>Nome</th><th>Cargo/Função</th><th>Setor</th><th>Telefone</th><th>E-mail</th></tr>
+          ${c.contatos.map(ct => `<tr><td>${esc(ct.nome)}</td><td>${esc(ct.cargo || '—')}</td><td>${esc(ct.setor || '—')}</td><td>${esc(ct.telefone || '—')}</td><td>${esc(ct.email || '—')}</td></tr>`).join('')}</table></div>`
           : '<p class="muted">Nenhum contato mapeado.</p>'}
       </div>
       <div class="panel"><h3>📈 Oportunidades</h3>
@@ -343,7 +385,7 @@ const App = {
       <div id="contatosBox">${(c.contatos || []).map((ct, i) => this.contatoRow(ct, i)).join('')}</div>
       <button class="btn btn-sm btn-ghost" onclick="App.addContatoRow()">＋ Adicionar contato</button>
       <div class="modal-actions">
-        ${id ? `<button class="btn btn-danger" onclick="App.excluirCliente(${id})">Excluir</button>` : ''}
+        ${id && Store.podeVerTudo(this.user) ? `<button class="btn btn-danger" onclick="App.excluirCliente(${id})">Excluir</button>` : ''}
         <span class="spacer"></span>
         <button class="btn btn-ghost" onclick="App.fecharModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="App.salvarCliente(${id || 'null'})">💾 Salvar</button>
@@ -355,6 +397,7 @@ const App = {
     const setores = Store.db.config.setores.map(s => `<option ${s === ct.setor ? 'selected' : ''}>${esc(s)}</option>`).join('');
     return `<div class="contato-row" data-ct>
       <input placeholder="Nome" class="ct-nome" value="${esc(ct.nome || '')}">
+      <input placeholder="Cargo / Função" class="ct-cargo" value="${esc(ct.cargo || '')}">
       <select class="ct-setor"><option value=""></option>${setores}</select>
       <input placeholder="Telefone" class="ct-tel" value="${esc(ct.telefone || '')}">
       <input placeholder="E-mail" class="ct-email" value="${esc(ct.email || '')}">
@@ -371,6 +414,7 @@ const App = {
     if (!empresa) return this.toast('⚠️ Informe o nome da empresa');
     const contatos = [...document.querySelectorAll('[data-ct]')].map(r => ({
       nome: r.querySelector('.ct-nome').value.trim(),
+      cargo: r.querySelector('.ct-cargo').value.trim(),
       setor: r.querySelector('.ct-setor').value,
       telefone: r.querySelector('.ct-tel').value.trim(),
       email: r.querySelector('.ct-email').value.trim()
@@ -399,6 +443,7 @@ const App = {
   },
 
   excluirCliente(id) {
+    if (!Store.podeVerTudo(this.user)) return this.toast('⚠️ Somente gerência/diretoria pode excluir.');
     const nOpps = Store.db.oportunidades.filter(o => o.clienteId === id).length;
     if (nOpps) return this.toast(`⚠️ Cliente tem ${nOpps} oportunidade(s). Exclua-as antes.`);
     if (!confirm('Excluir este cliente?')) return;
@@ -407,10 +452,21 @@ const App = {
   },
 
   // ================= PIPELINE / OPORTUNIDADES =================
+  // velocidade da etapa: entradas na etapa nos últimos 30 dias (via histórico) → ops/semana
+  velocidadeEtapa(etapa, opps) {
+    const corte = new Date(Date.now() - 30 * 86400000).toISOString();
+    let n = 0;
+    opps.forEach(o => (o.historico || []).forEach(h => {
+      if (h.em >= corte && (h.texto.includes(`para "${etapa}"`) || h.texto.includes(`na etapa "${etapa}"`))) n++;
+    }));
+    return Math.round(n / 30 * 7 * 10) / 10;
+  },
+
   vPipeline() {
     const cfg = Store.db.config;
     const ativas = this.aplicaFiltros(this.oppsAtivas());
     const fechadas = this.aplicaFiltros(Store.oppsVisiveis(this.user).filter(o => o.resultado));
+    const todasVisiveis = Store.oppsVisiveis(this.user);
     return `
     <div class="page-head"><h2>📈 Funil de Oportunidades</h2><span class="spacer"></span>
       <button class="btn btn-accent" onclick="App.novaOportunidade()">＋ Nova Oportunidade</button></div>
@@ -419,8 +475,10 @@ const App = {
       ${cfg.etapas.map(et => {
         const lista = ativas.filter(o => o.etapa === et);
         const total = lista.reduce((s, o) => s + (o.valor || 0), 0);
+        const vel = this.velocidadeEtapa(et, todasVisiveis);
         return `<div class="kcol">
           <div class="kcol-head"><span class="t">${esc(et)}</span><span class="n">${lista.length}</span></div>
+          <div class="kvel" title="Entradas nesta etapa nos últimos 30 dias">⚡ Velocidade (30d): <b>${vel} ops/sem</b></div>
           <div class="kcol-total">${fmtMoeda(total)}</div>
           ${lista.map(o => {
             const ag = this.agendaDe(o);
@@ -455,8 +513,11 @@ const App = {
     const ets = Store.db.config.etapas;
     const i = ets.indexOf(o.etapa) + dir;
     if (i < 0 || i >= ets.length) return;
+    const de = o.etapa;
     o.etapa = ets[i];
     o.ultimoContato = hoje();
+    o.proximoContato = addDiasUteis(hoje(), Store.db.config.diasUteisPipeline || 5);
+    Store.logOpp(o, `Moveu de "${de}" para "${o.etapa}"`, this.user.id);
     Store.upsert('oportunidades', o);
     this.go('pipeline');
     this.toast(`➡️ "${o.titulo}" agora em ${o.etapa}`);
@@ -482,14 +543,15 @@ const App = {
         <div class="fg"><label>Fabricante / Linha</label><select id="o_fab"><option value=""></option>${opts(cfg.fabricantes, o.fabricante)}</select></div>
         <div class="fg"><label>Responsável</label><select id="o_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === (o.responsavelId || this.user.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg"><label>Etapa</label><select id="o_etapa">${opts(cfg.etapas, o.etapa || cfg.etapas[0])}</select></div>
-        <div class="fg"><label>Prioridade</label><select id="o_prio">${opts(cfg.prioridades, o.prioridade || 'Média')}</select></div>
+        <div class="fg"><label>Prioridade</label><select id="o_prio">${opts(cfg.prioridades, prioNorm(o.prioridade))}</select></div>
         <div class="fg"><label>Valor estimado (R$)</label><input id="o_valor" type="number" min="0" step="100" value="${o.valor || ''}"></div>
         <div class="fg"><label>Último contato</label><input id="o_ult" type="date" value="${o.ultimoContato || hoje()}"></div>
-        <div class="fg"><label>Próximo contato</label><input id="o_prox" type="date" value="${o.proximoContato || addDias(hoje(), cfg.diasFollowUp)}"></div>
+        <div class="fg"><label>Próximo contato (${cfg.diasUteisPipeline || 5} dias úteis)</label><input id="o_prox" type="date" value="${o.proximoContato || addDiasUteis(hoje(), cfg.diasUteisPipeline || 5)}"></div>
+        <div class="fg"><label>Quem executa o próximo contato</label><select id="o_exec">${vendedores.map(u => `<option value="${u.id}" ${u.id === (o.execProxId || o.responsavelId || this.user.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg full"><label>Observações</label><textarea id="o_obs" rows="2">${esc(o.obs || '')}</textarea></div>
       </div>
       <div class="modal-actions">
-        ${id ? `<button class="btn btn-danger" onclick="App.excluirOpp(${id})">Excluir</button>` : ''}
+        ${id && Store.podeVerTudo(this.user) ? `<button class="btn btn-danger" onclick="App.excluirOpp(${id})">Excluir</button>` : ''}
         <span class="spacer"></span>
         <button class="btn btn-ghost" onclick="App.fecharModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="App.salvarOpp(${id || 'null'})">💾 Salvar</button>
@@ -509,11 +571,18 @@ const App = {
       valor: +document.getElementById('o_valor').value || 0,
       ultimoContato: document.getElementById('o_ult').value,
       proximoContato: document.getElementById('o_prox').value,
+      execProxId: document.getElementById('o_exec').value,
       obs: document.getElementById('o_obs').value.trim()
     };
     let opp;
-    if (id) opp = Object.assign({}, Store.opp(id), dados);
-    else opp = { id: Store.novoId(), dataCadastro: hoje(), resultado: null, ...dados };
+    if (id) {
+      const antes = Store.opp(id);
+      opp = Object.assign({}, antes, dados);
+      if (antes.etapa !== opp.etapa) Store.logOpp(opp, `Alterou etapa de "${antes.etapa}" para "${opp.etapa}" (edição)`, this.user.id);
+    } else {
+      opp = { id: Store.novoId(), dataCadastro: hoje(), resultado: null, ...dados };
+      Store.logOpp(opp, `Criou a oportunidade na etapa "${opp.etapa}"`, this.user.id);
+    }
     Store.upsert('oportunidades', opp);
     this.fecharModal();
     this.go('pipeline');
@@ -521,6 +590,7 @@ const App = {
   },
 
   excluirOpp(id) {
+    if (!Store.podeVerTudo(this.user)) return this.toast('⚠️ Somente gerência/diretoria pode excluir.');
     if (!confirm('Excluir esta oportunidade e suas interações/cotações?')) return;
     Store.removeOppCascade(id);
     this.fecharModal(); this.go('pipeline');
@@ -534,9 +604,9 @@ const App = {
     const cots = Store.db.cotacoes.filter(ct => ct.oppId === id);
     this.modal(`
       <h3>📈 ${esc(o.titulo)}</h3>
-      <p>${this.etapaChip(o)} <span class="chip ${(o.prioridade || '').toLowerCase().replace('é', 'e')}">${esc(o.prioridade || '')}</span> · <b>${fmtMoeda(o.valor)}</b></p>
+      <p>${this.etapaChip(o)} <span class="chip ${prioNorm(o.prioridade).toLowerCase().replace('é', 'e')}">${esc(prioNorm(o.prioridade))}</span> · <b>${fmtMoeda(o.valor)}</b></p>
       <p class="muted" style="margin:6px 0">🏭 ${esc(c?.empresa || '—')} · ${esc(o.fabricante || 'sem linha')} · Resp.: <b>${esc(Store.usuario(o.responsavelId)?.nome || '—')}</b></p>
-      <p class="muted">Cadastro ${fmtData(o.dataCadastro)} · Último contato ${fmtData(o.ultimoContato)} · Próximo ${fmtData(o.proximoContato)} (${this.diasSemAtualizacao(o)} dias sem atualização)</p>
+      <p class="muted">Cadastro ${fmtData(o.dataCadastro)} · Último contato ${fmtData(o.ultimoContato)} · Próximo ${fmtData(o.proximoContato)} — executa: <b>${esc(Store.usuario(o.execProxId || o.responsavelId)?.nome || '—')}</b> (${this.diasSemAtualizacao(o)} dias sem atualização)</p>
       ${o.obs ? `<p style="margin:8px 0">${esc(o.obs)}</p>` : ''}
       ${o.motivoPerda ? `<p style="margin:8px 0;color:var(--vermelho)">Motivo da perda: ${esc(o.motivoPerda)}</p>` : ''}
       <div class="panel" style="margin-top:12px"><h3>📚 Interações (${ints.length})</h3>
@@ -546,6 +616,9 @@ const App = {
       <div class="panel"><h3>📄 Cotações (${cots.length})</h3>
         ${cots.length ? cots.map(ct => `<p style="margin-bottom:6px"><b>${esc(ct.numero)}</b> · ${fmtMoeda(ct.valor)} · <span class="chip ${ct.status.toLowerCase()}">${esc(ct.status)}</span> · validade ${fmtData(ct.validade)}</p>`).join('') : '<p class="muted">Nenhuma cotação.</p>'}
         <button class="btn btn-sm btn-accent" onclick="App.fecharModal();App.modalCotacao(null,${id})">＋ Nova cotação</button>
+      </div>
+      <div class="panel"><h3>🕓 Histórico de alterações (${(o.historico || []).length})</h3>
+        ${(o.historico || []).length ? `<ul class="timeline">${o.historico.slice().reverse().slice(0, 10).map(h => `<li><div class="quando">${fmtData(h.em.slice(0, 10))} ${h.em.slice(11, 16)} · ${esc(Store.usuario(h.por)?.nome || h.por || '')}</div>${esc(h.texto)}</li>`).join('')}</ul>` : '<p class="muted">Sem registros ainda — as movimentações passam a ser gravadas automaticamente.</p>'}
       </div>
       <div class="modal-actions">
         ${!o.resultado ? `
@@ -569,6 +642,7 @@ const App = {
     o.resultado = resultado;
     o.dataFechamento = hoje();
     o.ultimoContato = hoje();
+    Store.logOpp(o, resultado === 'ganho' ? 'Marcou como GANHO 🏆' : `Marcou como PERDIDO${o.motivoPerda ? ' — ' + o.motivoPerda : ''}`, this.user.id);
     Store.upsert('oportunidades', o);
     this.fecharModal();
     this.go('pipeline');
@@ -579,6 +653,7 @@ const App = {
     const o = Store.opp(id);
     o.resultado = null; o.motivoPerda = ''; o.dataFechamento = null;
     if (o.etapa === 'Fechado') o.etapa = 'Proposta';
+    Store.logOpp(o, 'Reabriu a oportunidade', this.user.id);
     Store.upsert('oportunidades', o);
     this.fecharModal(); this.go('pipeline');
   },
@@ -620,7 +695,7 @@ const App = {
         <div class="fg full"><label>Relatório de visita / comentários <button type="button" class="btn-mic" title="Ditar por voz" onclick="App.ditar('i_rel', this)">🎤</button> <button type="button" class="btn-mic" title="Limpar ruídos e organizar em tópicos" onclick="App.organizarTexto('i_rel')">✨ Organizar</button></label><textarea id="i_rel" rows="5" placeholder="Detalhe a visita: quem recebeu, necessidades levantadas, equipamentos vistos, próximos passos... (ou dite por voz e toque em ✨ Organizar)"></textarea></div>
         <div class="fg"><label>Responsável</label><select id="i_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === this.user.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
         <div class="fg"><label>Próxima ação</label><input id="i_prox" placeholder="Ex.: Enviar proposta"></div>
-        <div class="fg full"><label><input type="checkbox" id="i_atualiza" checked style="width:auto;margin-right:6px">Atualizar "último contato" e reagendar follow-up (+${cfg.diasFollowUp} dias)</label></div>
+        <div class="fg full"><label><input type="checkbox" id="i_atualiza" checked style="width:auto;margin-right:6px">Atualizar "último contato" e reagendar follow-up (+${cfg.diasUteisPipeline || 5} dias úteis)</label></div>
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="App.fecharModal()">Cancelar</button>
@@ -655,7 +730,7 @@ const App = {
     if (oppId && document.getElementById('i_atualiza').checked) {
       const o = Store.opp(oppId);
       o.ultimoContato = data;
-      o.proximoContato = addDias(data, Store.db.config.diasFollowUp);
+      o.proximoContato = addDiasUteis(data, Store.db.config.diasUteisPipeline || 5);
       Store.upsert('oportunidades', o);
     }
     this.fecharModal();
@@ -728,7 +803,7 @@ const App = {
         <div class="fg"><label>Validade</label><input id="c_val" type="date" value="${ct.validade || addDias(hoje(), 30)}"></div>
       </div>
       <div class="modal-actions">
-        ${id ? `<button class="btn btn-danger" onclick="if(confirm('Excluir cotação?')){Store.remove('cotacoes',${id});App.fecharModal();App.go('cotacoes')}">Excluir</button>` : ''}
+        ${id && Store.podeVerTudo(this.user) ? `<button class="btn btn-danger" onclick="if(confirm('Excluir cotação?')){Store.remove('cotacoes',${id});App.fecharModal();App.go('cotacoes')}">Excluir</button>` : ''}
         <span class="spacer"></span>
         <button class="btn btn-ghost" onclick="App.fecharModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="App.salvarCotacao(${id || 'null'})">💾 Salvar</button>
@@ -774,9 +849,14 @@ const App = {
     ];
     const parados = ativas.filter(o => this.diasSemAtualizacao(o) > Store.db.config.diasParado);
     return `
-    <div class="page-head"><h2>📅 Agenda Inteligente & Alertas</h2>
-      <div class="sub">Follow-ups calculados automaticamente a partir do "próximo contato" de cada oportunidade</div></div>
+    <div class="page-head"><h2>📅 Agenda Inteligente & Alertas Temporais</h2>
+      <div class="sub">Monitoramentos cruzados: funil de oportunidades × validades de cotações × lembretes</div>
+      <span class="spacer"></span>
+      <button class="btn btn-accent" onclick="App.modalLembrete()">＋ Criar Lembrete / Alerta</button></div>
     ${this.filtrosHTML()}
+    ${this.secaoPrevencao()}
+    ${this.secaoFollowUpPropostas()}
+    ${this.secaoLembretes()}
     ${secs.map(s => {
       const lista = ativas.filter(o => this.agendaDe(o) === s.k)
         .sort((a, b) => (a.proximoContato || '').localeCompare(b.proximoContato || ''));
@@ -798,6 +878,97 @@ const App = {
           <td><button class="btn btn-sm btn-accent" onclick="App.modalInteracao(null,${o.id})">Registrar contato</button></td></tr>`).join('')}</table></div>`
         : '<p class="muted">Funil todo atualizado. 💚</p>'}
     </div>`;
+  },
+
+  // ---- seções novas da agenda (reunião 04/08) ----
+  secaoPrevencao() {
+    const cfg = Store.db.config;
+    const lista = this.cotacoesPrevencao();
+    return `<div class="panel agenda-sec" style="border-left:4px solid var(--laranja)">
+      <h3>⚠️ Alerta de Prevenção (${cfg.diasPrevencao || 2} dias) <span class="chip hoje">${lista.length}</span></h3>
+      <p class="muted" style="margin-bottom:8px">Cotações que vencem nos próximos ${cfg.diasPrevencao || 2} dias — agir antes de expirar.</p>
+      ${lista.length ? `<div class="table-wrap"><table><tr><th>Número</th><th>Cliente</th><th>Valor</th><th>Validade</th><th>Responsável</th><th></th></tr>
+        ${lista.map(c => `<tr><td><b>${esc(c.numero)}</b></td>
+          <td>${esc(Store.cliente(c.clienteId)?.empresa || '—')}</td>
+          <td>${fmtMoeda(c.valor)}</td><td><b>${fmtData(c.validade)}</b></td>
+          <td>${esc(Store.usuario(c.responsavelId)?.nome || '—')}</td>
+          <td><button class="btn btn-sm btn-accent" onclick="App.go('cotacoes')">Ir às cotações</button></td></tr>`).join('')}</table></div>`
+        : '<p class="muted">Nenhum item em risco imediato de expiração. ✅</p>'}
+    </div>`;
+  },
+
+  secaoFollowUpPropostas() {
+    const cfg = Store.db.config;
+    const lista = this.cotacoesFollowUp();
+    return `<div class="panel agenda-sec">
+      <h3>📄 Follow-up de propostas (${cfg.diasUteisProposta || 3} dias úteis após envio) <span class="chip prox">${lista.length}</span></h3>
+      ${lista.length ? `<div class="table-wrap"><table><tr><th>Número</th><th>Cliente</th><th>Enviada em</th><th>Responsável</th><th></th></tr>
+        ${lista.map(c => `<tr><td><b>${esc(c.numero)}</b></td>
+          <td>${esc(Store.cliente(c.clienteId)?.empresa || '—')}</td>
+          <td>${fmtData(c.dataEnvio)}</td>
+          <td>${esc(Store.usuario(c.responsavelId)?.nome || '—')}</td>
+          <td><button class="btn btn-sm btn-accent" onclick="App.go('cotacoes')">Acompanhar</button></td></tr>`).join('')}</table></div>`
+        : '<p class="muted">Nenhuma proposta aguardando follow-up. ✅</p>'}
+    </div>`;
+  },
+
+  secaoLembretes() {
+    const lista = this.lembretesAtivos().sort((a, b) => (a.dataLimite || '').localeCompare(b.dataLimite || ''));
+    return `<div class="panel agenda-sec">
+      <h3>🔔 Lembretes & Alertas manuais <span class="chip pendente">${lista.length}</span></h3>
+      ${lista.length ? `<div class="table-wrap"><table><tr><th>Lembrete</th><th>Responsável</th><th>Prioridade</th><th>Data limite</th><th></th></tr>
+        ${lista.map(l => {
+          const atrasado = l.dataLimite && l.dataLimite < hoje();
+          return `<tr><td>${esc(l.titulo)}</td>
+          <td>${esc(Store.usuario(l.responsavelId)?.nome || '—')}</td>
+          <td><span class="chip ${prioNorm(l.prioridade).toLowerCase().replace('é', 'e')}">${esc(prioNorm(l.prioridade))}</span></td>
+          <td>${atrasado ? `<span class="chip vencido">${fmtData(l.dataLimite)}</span>` : `<b>${fmtData(l.dataLimite)}</b>`}</td>
+          <td><button class="btn btn-sm btn-accent" onclick="App.concluirLembrete(${l.id})">✓ Concluir</button></td></tr>`;
+        }).join('')}</table></div>`
+        : '<p class="muted">Nenhum lembrete ativo. Use "＋ Criar Lembrete / Alerta" para compromissos avulsos.</p>'}
+    </div>`;
+  },
+
+  modalLembrete() {
+    const cfg = Store.db.config;
+    const vendedores = Store.db.usuarios;
+    this.modal(`
+      <h3>🔔 Criar Lembrete / Alerta</h3>
+      <div class="form-grid">
+        <div class="fg full"><label>Título do lembrete *</label><input id="l_titulo" placeholder="Ex.: Follow-up urgente de proposta com diretoria"></div>
+        <div class="fg"><label>Responsável</label><select id="l_resp">${vendedores.map(u => `<option value="${u.id}" ${u.id === this.user.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
+        <div class="fg"><label>Prioridade</label><select id="l_prio">${cfg.prioridades.map(p => `<option>${esc(p)}</option>`).join('')}</select></div>
+        <div class="fg"><label>Data vencimento / limite</label><input id="l_data" type="date" value="${hoje()}"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="App.fecharModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="App.salvarLembrete()">💾 Salvar Lembrete</button>
+      </div>`);
+    setTimeout(() => document.getElementById('l_titulo')?.focus(), 100);
+  },
+
+  salvarLembrete() {
+    const titulo = document.getElementById('l_titulo').value.trim();
+    if (!titulo) return this.toast('⚠️ Dê um título ao lembrete');
+    Store.upsert('lembretes', {
+      id: Store.novoId(), titulo,
+      responsavelId: document.getElementById('l_resp').value,
+      prioridade: document.getElementById('l_prio').value,
+      dataLimite: document.getElementById('l_data').value,
+      criadoPor: this.user.id, criadoEm: hoje(), feito: false
+    });
+    this.fecharModal();
+    this.go('agenda');
+    this.toast('🔔 Lembrete criado!');
+  },
+
+  concluirLembrete(id) {
+    const l = Store.db.lembretes.find(x => x.id === id);
+    if (!l) return;
+    l.feito = true; l.concluidoEm = hoje();
+    Store.upsert('lembretes', l);
+    this.go('agenda');
+    this.toast('✓ Lembrete concluído!');
   },
 
   // ================= DASHBOARD COMERCIAL =================
