@@ -531,8 +531,10 @@ const App = {
               <div class="m">${esc(Store.usuario(o.responsavelId)?.nome || '')} · ${esc(o.fabricante || '')}</div>
               ${ag === 'vencido' ? '<div class="m" style="color:var(--vermelho)">⚠ follow-up vencido</div>' : ''}
               <div class="kmove" onclick="event.stopPropagation()">
-                <button title="Etapa anterior" onclick="App.moverOpp(${o.id},-1)">◀</button>
-                <button title="Próxima etapa" onclick="App.moverOpp(${o.id},1)">▶</button>
+                <label class="kmove-lbl">Mover etapa:</label>
+                <select onchange="App.moverOppPara(${o.id}, this.value)">
+                  ${cfg.etapas.map(e => `<option ${e === o.etapa ? 'selected' : ''}>${esc(e)}</option>`).join('')}
+                </select>
               </div>
             </div>`;
           }).join('')}
@@ -550,13 +552,12 @@ const App = {
     </div>`;
   },
 
-  moverOpp(id, dir) {
+  // salto direto para qualquer etapa (pedido do Tom: "de Validado para Proposta")
+  moverOppPara(id, novaEtapa) {
     const o = Store.opp(id);
-    const ets = Store.db.config.etapas;
-    const i = ets.indexOf(o.etapa) + dir;
-    if (i < 0 || i >= ets.length) return;
+    if (!o || o.etapa === novaEtapa) return;
     const de = o.etapa;
-    o.etapa = ets[i];
+    o.etapa = novaEtapa;
     o.ultimoContato = hoje();
     o.proximoContato = addDiasUteis(hoje(), Store.db.config.diasUteisPipeline || 5);
     Store.logOpp(o, `Moveu de "${de}" para "${o.etapa}"`, this.user.id);

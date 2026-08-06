@@ -204,9 +204,10 @@ td .link:hover { text-decoration: underline; }
 .kcard .v { color: var(--verde); font-weight: 700; }
 .kcard .m { color: var(--muted); font-size: .74rem; }
 .kcard.atrasado { border-left-color: var(--vermelho); }
-.kmove { display: flex; gap: 4px; margin-top: 6px; }
-.kmove button { flex: 1; border: 1px solid var(--borda); background: var(--fundo); border-radius: 7px; cursor: pointer; font-size: .8rem; padding: 3px; }
-.kmove button:hover { background: var(--lime); }
+.kmove { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+.kmove-lbl { font-size: .68rem; color: var(--muted); white-space: nowrap; }
+.kmove select { flex: 1; border: 1px solid var(--borda); background: var(--fundo); border-radius: 7px; cursor: pointer; font-size: .76rem; padding: 4px; min-width: 0; }
+.kmove select:hover { border-color: var(--lime); }
 
 /* ===== BARRAS (gráficos simples) ===== */
 .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: .82rem; }
